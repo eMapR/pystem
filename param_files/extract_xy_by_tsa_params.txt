@@ -1,0 +1,21 @@
+var_name	data_type	data_band	search_str	basepath	by_tsa	nodata	path_filter
+elevation	continuous	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	-9999
+slope	continuous	1	slppct_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	-9999
+aspectNESW	continuous	1	aspectNESW_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	255
+aspectNWSE	continuous	1	aspectNWSE_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	255
+delta_green	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dg_t.bsq	/vol/v1/scenes	1
+delta_bright	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_db_t.bsq	/vol/v1/scenes	1
+delta_wet	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dw_t.bsq	/vol/v1/scenes	1
+delta_nbr	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dnbr_t.bsq	/vol/v1/scenes	1
+greenness	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_g_t.bsq	/vol/v1/scenes	1
+brightness	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_b_t.bsq	/vol/v1/scenes	1
+wetness	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_w_t.bsq	/vol/v1/scenes	1
+nbr	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_nbr_t.bsq	/vol/v1/scenes	1
+time_since	continuous	-1	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_ts_v.bsq	/vol/v1/scenes	1
+mse	continuous	-1	*_mse_split.bsq	/vol/v1/scenes	1
+
+tsa_mosaic; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
+tsa_txt; /vol/v2/stem/scripts/tsa_orwaca.txt
+xy_txt; /vol/v2/stem/imperv/samples/imperv_sample94536_20161018_2318/imperv_sample94536_20161018_2318.txt
+out_dir;  /vol/v2/stem/imperv/samples/imperv_sample94536_20161018_2318
+years; 2001

@@ -1,0 +1,14 @@
+Parameters for filter_raster.py
+
+path; /vol/v2/stem/canopy/time_series/2003/canopy_2003_vote.bsq
+databand; 1
+function; average
+kernel_size; 10
+out_path; /vol/v2/stem/ebird/predictors/avgcanopy_150m_2003.bsq
+
+Optional parameters
+n_tiles; 25, 15
+n_jobs; 30
+kernel_type; circle
+nodata; 255
+

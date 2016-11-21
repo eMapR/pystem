@@ -1,0 +1,33 @@
+var_name	data_band	search_str	basepath	by_tsa	path_filter
+elevation	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+landcover	1	lst_run1_prediction_voting_lulc_RF_mosaic_{0}.bsq	/vol/v1/proj/lst/outputs/models/randomforest/rfprediction_mosaic/yearly	0
+imperv	1	imperv_vote_{0}.bsq	/vol/v2/stem/imperv/time_series/*	0
+canopy	1	canopy_vote_{0}.bsq	/vol/v2/stem/canopy/time_series/*	0
+pctwater_150	1	pctwater_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctwater_150m	0
+pctsnow_150	1	pctsnow_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctsnow_150m	0
+pctbareground_150	1	pctbareground_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_150m	0
+pctdeciduous_150	1	pctdeciduous_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_150m	0
+pctconiferous_150	1	pctconiferous_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_150m	0
+pctshrub_150	1	pctshrub_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_150m	0
+avgimperv_150	1	avgimperv_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_150m	0
+avgcanopy_150	1	avgcanopy_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_150m	0
+pctwater_450	1	pctwater_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctwater_450m	0
+pctsnow_450	1	pctsnow_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctsnow_450m	0
+pctbareground_450	1	pctbareground_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_450m	0
+pctdeciduous_450	1	pctdeciduous_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_450m	0
+pctconiferous_450	1	pctconiferous_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_450m	0
+pctshrub_450	1	pctshrub_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_450m	0
+avgimperv_450	1	avgimperv_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_450m	0
+avgcanopy_450	1	avgcanopy_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_450m	0
+
+model_dir; /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161120_2038
+train_params; /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161120_2038/train_stem_regressor_params.txt
+mosaic_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
+support_size; 400000, 300000
+n_tiles; 25, 15
+nodata; 255
+out_dir;  /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161120_2038
+
+Optional parameters
+constant_vars; YEAR:2007, DAY:167, TIME:7, EFFORT_HRS:1
+

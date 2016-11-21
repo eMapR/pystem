@@ -1,0 +1,14 @@
+
+pred_path; /vol/v2/stem/canopy/outputs/canopy_20160409_1800/canopy_20160409_1800_final_vote_masked.bsq
+targ_path; /vol/v2/stem/canopy/truth_map/canopy2001_CAORWA.bsq
+lc_path; /vol/v1/general_files/datasets/spatial_data/states_spatial_data/calorewash_buffer_spatial_data/calorewash_buffer_nlcd2001_landcover_shift.tif
+mask_path; 
+nodata_p; -9999
+nodata_t; 255
+nodata_lc; 255
+search_dir; /vol/v2/stem/extent_shp
+search_str; hex%s_CAORWA.shp
+eval_scales; 10000, 20000, 50000
+out_dir; /vol/v2/stem/canopy/outputs/canopy_20160330_2355/evaluation_mean
+
+clip_shp

@@ -1,0 +1,4 @@
+tsa_txt; /vol/v2/stem/scripts/tsa_orwaca.txt
+basepath; /vol/v1/scenes
+search_str; *_mse_split.bsq
+n_jobs; 100

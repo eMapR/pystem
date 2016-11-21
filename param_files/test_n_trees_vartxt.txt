@@ -1,0 +1,14 @@
+var_name	data_band	search_str	basepath	by_tsa	path_filter
+elevation	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+slope	1	slppct_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+aspectNESW	1	aspectNESW_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+aspectNWSE	1	aspectNWSE_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+delta_green	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dg_t.bsq	/vol/v1/scenes	1
+delta_bright	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_db_t.bsq	/vol/v1/scenes	1
+delta_wet	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dw_t.bsq	/vol/v1/scenes	1
+delta_nbr	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dnbr_t.bsq	/vol/v1/scenes	1
+greenness	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_g_t.bsq	/vol/v1/scenes	1
+brightness	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_b_t.bsq	/vol/v1/scenes	1
+wetness	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_w_t.bsq	/vol/v1/scenes	1
+nbr	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_nbr_t.bsq	/vol/v1/scenes	1
+time_since	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_ts_v.bsq	/vol/v1/scenes	1

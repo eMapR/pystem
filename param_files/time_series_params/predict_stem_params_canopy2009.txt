@@ -1,0 +1,24 @@
+var_name	data_band	search_str	basepath	by_tsa	path_filter
+elevation	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+slope	1	slppct_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+aspectNESW	1	aspectNESW_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+aspectNWSE	1	aspectNWSE_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0
+delta_green	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dg_t.bsq	/vol/v1/scenes	1
+delta_bright	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_db_t.bsq	/vol/v1/scenes	1
+delta_wet	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dw_t.bsq	/vol/v1/scenes	1
+delta_nbr	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_dnbr_t.bsq	/vol/v1/scenes	1
+greenness	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_g_t.bsq	/vol/v1/scenes	1
+brightness	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_b_t.bsq	/vol/v1/scenes	1
+wetness	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_w_t.bsq	/vol/v1/scenes	1
+nbr	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_nbr_t.bsq	/vol/v1/scenes	1
+time_since	26	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_ts_v.bsq	/vol/v1/scenes	1
+mse	26	*_mse_split.bsq	/vol/v1/scenes	1
+
+model_dir; /vol/v2/stem/canopy/models/canopy_20161018_2254
+train_params; /vol/v2/stem/canopy/models/canopy_20161018_2254/train_stem_regressor_params.txt
+mosaic_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
+support_size; 200000, 150000
+n_tiles; 25, 15
+nodata; 255
+file_stamp; canopy_2009
+out_dir; /vol/v2/stem/canopy/time_series/2009

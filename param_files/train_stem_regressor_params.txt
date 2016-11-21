@@ -1,0 +1,39 @@
+var_name	data_band	search_str	basepath	by_tsa	nodata	path_filter
+elevation	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	-9999
+landcover	1	lst_run1_prediction_voting_lulc_RF_mosaic_{0}.bsq	/vol/v1/proj/lst/outputs/models/randomforest/rfprediction_mosaic/yearly	0	0
+imperv	1	imperv_vote_{0}.bsq	/vol/v2/stem/imperv/time_series/*	0	255
+canopy	1	canopy_vote_{0}.bsq	/vol/v2/stem/canopy/time_series/*	0	255
+pctwater_150	1	pctwater_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctwater_150m	0	255
+pctsnow_150	1	pctsnow_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctsnow_150m	0	255
+pctbareground_150	1	pctbareground_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_150m	0	255
+pctdeciduous_150	1	pctdeciduous_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_150m	0	255
+pctconiferous_150	1	pctconiferous_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_150m	0	255
+pctshrub_150	1	pctshrub_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_150m	0	255
+avgimperv_150	1	avgimperv_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_150m	0	255
+avgcanopy_150	1	avgcanopy_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_150m	0	255
+pctwater_450	1	pctwater_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctwater_450m	0	255
+pctsnow_450	1	pctsnow_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctsnow_450m	0	255
+pctbareground_450	1	pctbareground_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_450m	0	255
+pctdeciduous_450	1	pctdeciduous_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_450m	0	255
+pctconiferous_450	1	pctconiferous_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_450m	0	255
+pctshrub_450	1	pctshrub_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_450m	0	255
+avgimperv_450	1	avgimperv_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_450m	0	255
+avgcanopy_450	1	avgcanopy_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_450m	0	255
+
+sample_txt; /vol/v2/stem/ebird/samples/p_melanocephalus_res1yr/erd_v5_Pheucticus_melanocephalus_predictors.txt
+target_col; p_melanocephalus
+mosaic_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
+tsa_txt; /vol/v2/stem/scripts/tsa_orwaca.txt
+cell_size; 200000, 150000
+support_size; 400000, 300000
+sets_per_cell; 15
+gsrd_shp; /vol/v2/stem/extent_shp/orwaca.shp
+min_obs; 25
+out_dir; /vol/v2/stem/ebird/models/
+
+Optional parameters
+max_features; auto
+err_threshold; 50
+out_dirname; p_melanocephalus_res1yr
+constant_vars; YEAR, DAY, TIME, EFFORT_HRS
+

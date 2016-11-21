@@ -1,0 +1,7 @@
+Paramater File for test_n_trees.py
+
+target_col; imperv
+sample_txt; /vol/v2/stem/imperv/samples/imperv_sample141806_20160702_1714/imperv_sample141806_20160702_1714_predictors.txt
+var_txt; /vol/v2/stem/param_files/test_n_trees_vartxt.txt
+max_trees; 500
+step; 10

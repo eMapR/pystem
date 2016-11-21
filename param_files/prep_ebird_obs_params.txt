@@ -1,0 +1,35 @@
+var_name	data_type	data_band	search_str	basepath	by_tsa	nodata	path_filter
+elevation	continuous	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	-9999
+landcover	discrete	1	lst_run1_prediction_voting_lulc_RF_mosaic_{0}.bsq	/vol/v1/proj/lst/outputs/models/randomforest/rfprediction_mosaic/yearly	0	0
+imperv	continuous	1	imperv_vote_{0}.bsq	/vol/v2/stem/imperv/time_series/*	0	255
+canopy	continuous	1	canopy_vote_{0}.bsq	/vol/v2/stem/canopy/time_series/*	0	255
+pctwater_150	continuous	1	pctwater_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctwater_150m	0	255
+pctsnow_150	continuous	1	pctsnow_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctsnow_150m	0	255
+pctbareground_150	continuous	1	pctbareground_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_150m	0	255
+pctdeciduous_150	continuous	1	pctdeciduous_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_150m	0	255
+pctconiferous_150	continuous	1	pctconiferous_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_150m	0	255
+pctshrub_150	continuous	1	pctshrub_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_150m	0	255
+avgimperv_150	continuous	1	avgimperv_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_150m	0	255
+avgcanopy_150	continuous	1	avgcanopy_150m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_150m	0	255
+pctwater_450	continuous	1	pctwater_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctwater_450m	0	255
+pctsnow_450	continuous	1	pctsnow_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctsnow_450m	0	255
+pctbareground_450	continuous	1	pctbareground_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_450m	0	255
+pctdeciduous_450	continuous	1	pctdeciduous_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_450m	0	255
+pctconiferous_450	continuous	1	pctconiferous_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_450m	0	255
+pctshrub_450	continuous	1	pctshrub_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_450m	0	255
+avgimperv_450	continuous	1	avgimperv_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_450m	0	255
+avgcanopy_450	continuous	1	avgcanopy_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_450m	0	255
+
+obs_txt; /vol/v2/stem/ebird/samples/erd_v5_Pheucticus_melanocephalus.txt
+search_dir; /vol/v2/stem/ebird/samples/
+search_str; xy_prj_%s_kernelstats.txt
+target_col; p_melanocephalus
+index_col; obs_id
+year_col; YEAR
+year_start; 2002
+year_end; 2012 
+out_txt; /vol/v2/stem/ebird/samples/p_melanocephalus/predictors.txt
+add_file_tag; 1
+count_type; P21
+day_minmax; 153, 182
+
