@@ -24,10 +24,9 @@ import warnings
 #from string import ascii_lowercase
 from osgeo import gdal, ogr
 from gdalconst import *
-from sklearn import tree
+from sklearn import tree, metrics
 from multiprocessing import Pool
 from datetime import datetime
-from sklearn import metrics
 import cPickle as pickle
 import pandas as pd
 import numpy as np
@@ -573,7 +572,7 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
     return paths[0]
 
 
-def fit_tree(x_train, y_train, max_features=None):
+def fit_tree_classifier(x_train, y_train, max_features=None):
     ''' '''
     if not max_features: max_features=None
     dt = tree.DecisionTreeClassifier(max_features=max_features)
@@ -591,7 +590,7 @@ def fit_tree_regressor(x_train, y_train, max_features=None):
     return dt
 
 
-def fit_bdt_tree_regressor(x_samples, y_samples, pct_bagged=.63, err_threshold=10):
+def fit_bdt_tree_regressor(x_samples, y_samples, pct_bagged=.63):
     
     inds = random.sample(x_samples.index, int(len(x_samples) * pct_bagged))
     x_train = x_samples.ix[inds]
@@ -601,7 +600,7 @@ def fit_bdt_tree_regressor(x_samples, y_samples, pct_bagged=.63, err_threshold=1
     
     x_oob = x_samples.ix[~x_samples.index.isin(inds)]
     y_oob = y_samples.ix[x_oob.index]
-    oob_rate = calc_oob_rate(dt, y_oob, x_oob, err_threshold)
+    oob_rate = calc_oob_rate(dt, y_oob, x_oob)
     
     return dt, oob_rate
     
@@ -640,21 +639,28 @@ def write_model(out_dir, df_sets):
     return df_sets, set_txt
 
 
-def calc_oob_rate(dt, oob_samples, oob_predictors, err_threshold):
+def calc_oob_rate(dt, oob_samples, oob_predictors, model_type='classifier'):
     '''
     Return the Out of Bag accuracy rate for the decision tree, dt, and the
     Out of Bag samples, oob_samples
     '''
+    
     oob_prediction = dt.predict(oob_predictors)
-    abs_error = np.abs(oob_prediction - oob_samples)
-    n_correct = len(oob_samples[abs_error <= err_threshold])
-    n_samples = len(oob_samples)
-    oob_rate = int(round(float(n_correct)/n_samples * 100, 0))
+    
+    # If the model is a regressor, calculate the pierson's R squared
+    if model_type.lower() == 'regressor':
+        oob_rate = metrics.r2_score(oob_samples, oob_prediction)
+    
+    # Otherwise, get the percent correct
+    else:
+        n_correct = len(oob_samples[oob_samples == oob_prediction])
+        n_samples = len(oob_samples)
+        oob_rate = int(round(float(n_correct)/n_samples * 100, 0))
     
     return oob_rate
 
 
-def get_oob_rates(df_sets, df_oob, err_threshold, target_col, predict_cols, min_oob=0):
+def get_oob_rates(df_sets, df_oob, target_col, predict_cols, min_oob=0):
     
     for i, row in df_sets.iterrows():
         #with open(row.dt_file) as f:
@@ -663,14 +669,14 @@ def get_oob_rates(df_sets, df_oob, err_threshold, target_col, predict_cols, min_
         this_oob = df_oob[df_oob.set_id == i]
         oob_samples = this_oob[target_col]
         oob_predictors = this_oob[predict_cols]
-        oob_rate = calc_oob_rate(dt, oob_samples, oob_predictors, err_threshold)
+        oob_rate = calc_oob_rate(dt, oob_samples, oob_predictors)
         df_sets.ix[i, 'oob_rate'] = oob_rate
     low_oob = df_sets[df_sets.oob_rate < min_oob]
     
     return df_sets, low_oob
 
 
-def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, df_oob, df_sets, val_col, var_cols, err_threshold, out_dir, file_stamp, prj, driver):
+def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, df_oob, df_sets, val_col, var_cols, out_dir, file_stamp, prj, driver):
     
     t0 = time.time()
     ar_oob = np.full((ysize, xsize), nodata, dtype=np.int16)
@@ -696,7 +702,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, df_oob
             this_oob = df_oob[df_oob.set_id == i]
             oob_samples = this_oob[val_col]
             oob_predictors = this_oob[var_cols]
-            df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_samples, oob_predictors, err_threshold)#'''
+            df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_samples, oob_predictors)#'''
     
     for i, (t_ind, t_row) in enumerate(df_tiles.iterrows()):
         t1 = time.time()
