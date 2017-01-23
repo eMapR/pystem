@@ -4,6 +4,7 @@
 The STEM is an ensemble of locally defined, randomly located, spatially overalpping decision trees and generates a final prediction by aggregating over all overlapping pixels with either the mean, mode, or weighted mean. These scripts offer a Python implementation of the STEM algorithm developed by Fink and others (2010)
 
 [Processing workflow](https://docs.google.com/document/d/1Weg1KNnGq-rMyaGvv3OvbWbYglNOYVOywyK6w3trtyc/edit?usp=sharing)
+
 [Development journal](https://docs.google.com/document/d/1mIKBglvLHEccVvnEJaqJc5o27pPZJT4YOX8K8CMrHbI/edit?usp=sharing)
 
 ![alt text](https://github.com/smHooper/stem/blob/master/misc/sets_medium.jpeg "STEM illustration")
