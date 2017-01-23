@@ -19,7 +19,7 @@ import numpy as np
 import stem
 #import generate_gsrd as gsrd
 
-def main(params, min_oob=0, err_threshold=10):
+def main(params, pct_train=None, min_oob=0, err_threshold=10):
     t0 = time.time()
     
     #read_params(params)
@@ -29,7 +29,6 @@ def main(params, min_oob=0, err_threshold=10):
         exec ("{0} = str({1})").format(i, inputs[i])
     try:
         if 'max_features' not in locals(): max_features=None
-        if 'pct_train' not in locals(): pct_train=None
         if 'err_threshold' in inputs: err_threshold = float(err_threshold)
         if 'min_oob' in inputs: min_oob = int(min_oob)
         num_vars = stem.vars_to_numbers(cell_size, support_size, sets_per_cell,
@@ -53,6 +52,7 @@ def main(params, min_oob=0, err_threshold=10):
     shutil.copy2(params, out_dir) #Copy the params for reference
     
     df_train = pd.read_csv(sample_txt, sep='\t')
+    n_samples = len(df_train)
     # Check that df_train has exactly the same columns as variables specified in df_vars
     unmatched_vars = [v for v in df_var.index if v not in [c for c  in df_train]]
     if len(unmatched_vars) != 0:
@@ -114,20 +114,21 @@ def main(params, min_oob=0, err_threshold=10):
     # Record params in inventory text file
     if 'inventory_txt' in locals():
         t1 = time.time()
-        print 'Getting model info...\n'
+        '''print 'Getting model info...\n'
         df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
         if 'regressor' in params: 
             model_type = 'Regressor'
         else: 
             model_type = 'Classifier'
         n_sets = len(df_sets)
-        n_samples = int(sample_txt.split('_')[1].replace('sample',''))
+        if 'sample' in sample_txt:
+            n_samples = int(sample_txt.split('_')[1].replace('sample',''))
         info = [model_type, None, None, None, None, None, None, None, None, n_sets, n_samples, str(support_size), sets_per_cell, max_features]
         df_inv.ix[stamp] = info
         info_dir = os.path.dirname(inventory_txt)
         existing_models = fnmatch.filter(os.listdir(os.path.dirname(info_dir)), '%s*' % target_col)
         if len(existing_models) > 0:
-            df_inv = df_inv[df_inv.index.isin(existing_models)]
+            df_inv = df_inv[df_inv.index.isin(existing_models)]'''
         
         # Check if oob_map params were specified. If not, set to defaults
         if 'err_threshold' not in locals():
@@ -164,12 +165,12 @@ def main(params, min_oob=0, err_threshold=10):
         #if 'inventory_txt' in locals() :
         avg_oob = round(np.mean(ar_oob[mask]), 1)
         avg_cnt = int(round(np.mean(ar_cnt[mask]), 0))
-        df_inv.ix[stamp, 'avg_oob'] = avg_oob
-        df_inv.ix[stamp, 'avg_count'] = avg_cnt
+        '''df_inv.ix[stamp, 'avg_oob'] = avg_oob
+        #df_inv.ix[stamp, 'avg_count'] = avg_cnt
         if len(df_inv) > 1:
             df_inv.to_csv(inventory_txt, sep='\t')
         else:
-            print 'WARNING: Model info not written to inventory_txt...\n'
+            print 'WARNING: Model info not written to inventory_txt...\n' '''
         
         print '\nAverage OOB score: .................... %.1f' % avg_oob
         print '\nAverage number of overlapping sets: ... %s\n' % avg_cnt

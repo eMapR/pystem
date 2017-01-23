@@ -1,7 +1,9 @@
 Paramater File for test_n_trees.py
 
-target_col; imperv
-sample_txt; /vol/v2/stem/imperv/samples/imperv_sample141806_20160702_1714/imperv_sample141806_20160702_1714_predictors.txt
-var_txt; /vol/v2/stem/param_files/test_n_trees_vartxt.txt
+target_col; p_melanocephalus
+sample_txt; /vol/v2/stem/ebird/samples/p_melanocephalus_res1yr_20161201_1231/erd_v5_Pheucticus_melanocephalus_predictors_2012_only.txt
+var_txt; /vol/v2/stem/ebird/predict_rf_params/var_text_ebird_p_melanocephalus.txt
 max_trees; 500
 step; 10
+
+constant_vars; YEAR, EFFORT_HRS

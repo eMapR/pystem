@@ -1,6 +1,8 @@
 import sys
 import os
 import time
+import glob
+import fnmatch
 import gdal
 import random
 import pandas as pd
@@ -34,9 +36,8 @@ def read_params(txt):
     n_skip_lines = 0 #Keep track of the number of lines w/ a ";"
     #import pdb; pdb.set_trace()
     for var in lines:
-        print var
         if len(var) == 2:
-            d[var[0].replace(" ", "")] = '"%s"' % var[1].strip(" ").replace("\n", "")
+            d[var[0].strip()] = '"%s"' % var[1].strip().replace("\n", "")
             n_skip_lines += 1
 
     print '\nParameters read from:\n', txt, '\n'
@@ -303,7 +304,11 @@ def train_rf_classifier(x, y, ntrees=50, njobs=12, max_depth=None):
 
 def train_rf_regressor(x, y, ntrees=50, njobs=12, max_depth=None):
     ''' Return a Random Forest regressor'''
-    rf = ensemble.RandomForestRegressor(n_estimators=ntrees, n_jobs=njobs, max_depth=max_depth, max_features='sqrt', oob_score=True)
+    rf = ensemble.RandomForestRegressor(n_estimators=ntrees,
+                                        n_jobs=njobs,
+                                        max_depth=max_depth,
+                                        max_features='sqrt',
+                                        oob_score=True)
     rf.fit(x, y)
 
     return rf
@@ -317,7 +322,50 @@ def save_rfmodel(rf, filename):
     return filename
 
 
-def get_predictors(df_var, nodata):
+def find_file(basepath, search_str, tsa_str=None, path_filter=None):
+    '''
+    Return the full path within the directory tree /basepath/tsa_str if search_str
+    is in the filename. Optionally, if path_filter is specified, only a path that
+    contains path_filter will be returned.
+    '''
+    '''if not os.path.exists(basepath):
+        print 'basepath does not exist: \n%s' % basepath
+        return None'''
+     
+    if tsa_str: 
+        bp = os.path.join(basepath, tsa_str)
+
+        # Search the bp directory tree. If search_str is in a file, get the full path.
+        paths = []
+        for root, dirs, files in os.walk(bp, followlinks=True):
+            these_paths = [os.path.join(root, f) for f in files]
+            these_paths = fnmatch.filter(these_paths, search_str)
+            paths.extend(these_paths)
+    else:
+        paths = glob.glob(os.path.join(basepath, search_str))
+    
+    # If path filter is specified, remove any paths that contain it
+    if path_filter:
+        [paths.remove(p) for p in paths if fnmatch.fnmatch(p, path_filter)]
+        #paths = [p for p in paths if fnmatch.fnmatch(p, path_filter)]
+    
+    '''if len(paths) > 1:
+        print 'Multiple files found for tsa: ' + tsa_str
+        for p in paths:
+            print p
+        print 'Selecting the first one found...\n'# '''
+    
+    #import pdb; pdb.set_trace()
+    if len(paths) < 1:
+        #pdb.set_trace()
+        sys.exit(('No files found for tsa {0} with basepath {1} and ' +\
+        'search_str {2}\n').format(tsa_str, basepath, search_str))
+    
+    return paths[0]
+
+
+
+def get_predictors(df_var, nodata, ydims=None, constant_vars=None):
     '''
     Return an array of flattened predictor arrays where each predictor is a
     separate column
@@ -325,26 +373,46 @@ def get_predictors(df_var, nodata):
     t0 = time.time()
     predictors = []
     for var, row in df_var.iterrows():
-        print 'Getting prediction array for ', var
-        this_path = row.file
+        data_band, search_str, basepath, by_tsa, nodata, path_filter = row
+        #import pdb; pdb.set_trace()
+        
+        if constant_vars: search_str = search_str.format(constant_vars['YEAR'])        
+        
+        this_path = find_file(basepath, search_str)
         if not os.path.exists(this_path):
             sys.exit('\nERROR: Raster path specified does not exist: %s' % this_path)
         ds = gdal.Open(this_path)
-        ar_var = ds.ReadAsArray()
+        try:
+            xsize = ds.RasterXSize
+        except:
+            import pdb; pdb.set_trace()
+        if ydims:
+            upper_ydim, lower_ydim = ydims
+            this_ysize = lower_ydim - upper_ydim
+            ar_var = ds.ReadAsArray(0, upper_ydim, xsize, this_ysize)
+        else:
+            ar_var = ds.ReadAsArray()
         ds = None
         this_nodata = row.nodata
         ar_var[ar_var == this_nodata] = nodata # Change var nodata to nodata val for output
         predictors.append(ar_var.ravel())
         #print 'Shape of %s: %s' % (var, ar_var.ravel().shape)
+    
+    if constant_vars:
+        size = predictors[0].size
+        for const in sorted(constant_vars.keys()):
+            val = constant_vars[const]
+            predictors.append(np.full(size, val, dtype=np.int16))
+            
     # Make an array where each row is a different predictor
     ar = np.vstack(predictors).T
     del predictors
     nodata_mask = np.all(~(ar == nodata), axis=1) #Maybe should be np.any?
     ar = ar[nodata_mask]
 
-    print 'Finished getting arrays... %.1f minutes\n' % ((time.time() - t0)/60)
+    print 'Finished getting arrays: %.1f minutes' % ((time.time() - t0)/60)
     return ar, nodata_mask
-
+    
 
 def array_to_raster(array, tx, prj, driver, out_path, dtype, nodata=None):
     ''' Save a numpy array as a new raster '''

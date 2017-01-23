@@ -24,16 +24,18 @@ sample_txt; /vol/v2/stem/ebird/samples/p_melanocephalus_res1yr/erd_v5_Pheucticus
 target_col; p_melanocephalus
 mosaic_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
 tsa_txt; /vol/v2/stem/scripts/tsa_orwaca.txt
-cell_size; 200000, 150000
-support_size; 400000, 300000
-sets_per_cell; 15
+cell_size; 400000, 300000
+support_size; 1200000, 600000
+sets_per_cell; 10
 gsrd_shp; /vol/v2/stem/extent_shp/orwaca.shp
 min_obs; 25
-out_dir; /vol/v2/stem/ebird/models/
+out_dir; /vol/v2/stem/ebird/models
 
 Optional parameters
 max_features; auto
 err_threshold; 50
 out_dirname; p_melanocephalus_res1yr
 constant_vars; YEAR, DAY, TIME, EFFORT_HRS
+pct_train; 0.8
+inventory_txt; 1
 

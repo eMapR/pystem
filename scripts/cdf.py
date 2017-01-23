@@ -7,8 +7,11 @@ Created on Tue Nov  8 21:44:25 2016
 import gdal
 import numpy as np
 from matplotlib import pyplot as plt
+import seaborn as sns
 
-plt.style.use('ggplot')
+#plt.style.use('ggplot')
+sns.set_style('white')
+sns.set_context(context='paper', font_scale=1.4)
 
 def cdf(ar, bins):
     
@@ -35,9 +38,9 @@ def main(p_path, t_path, p_mean, bins, xlim=None, ylim=None, out_png=None):
     cdf_m = cdf(ar_m, bins)
     
     bins = bins[:-1]
-    plt.plot(bins, cdf_p, '-', label='STEM mode')
-    plt.plot(bins, cdf_m, '-', label='STEM mean')
-    plt.plot(bins, cdf_t, 'k--', label='NLCD')
+    plt.plot(bins, cdf_p, '-', label='STEM mode', color=(0.8862745098039215, 0.2901960784313726, 0.2))
+    plt.plot(bins, cdf_m, '-', label='STEM mean', color=(0.39215686274509803, 0.7098039215686275, 0.803921568627451))
+    plt.plot(bins, cdf_t, 'k--', label='NLCD', color='k')
     
     if xlim:
         plt.xlim(xlim[0], xlim[1])
@@ -49,8 +52,9 @@ def main(p_path, t_path, p_mean, bins, xlim=None, ylim=None, out_png=None):
     
     plt.xlabel('Map Value')
     plt.ylabel('Pixels (x 10 )')
+    sns.despine()
     if out_png:
-        plt.savefig(out_png)
+        plt.savefig(out_png, dpi=300)
     del ar_t, ar_p
     plt.clf()
 

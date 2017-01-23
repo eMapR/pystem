@@ -150,10 +150,10 @@ def extract_at_xy(df, array, data_tx, val_name):
     
     df[val_name] = [array[r, c] if r > 0 and r < ar_rows and c > 0 and c < ar_cols else None for r,c in zip(df['row'], df['col'])]
     
-    #return df[['row', 'col', 'val']] 
+    return df[['row', 'col', val_name]] 
 
 
-def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, val_cols, data_type, nodata=None):
+def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, val_cols, data_type, nodata=None, kernel=False):
     '''
     Return a df with values from all pixels defined by row, col in df. 
     If row_dirs and col_dirs are defined, get surrounding pixels in a 
@@ -179,22 +179,28 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
         # Calc row, col of the dataset for each point
         row_off = int((tx[3] - mosaic_tx[3])/tx[5])
         col_off = int((tx[0] - mosaic_tx[0])/tx[1])
+    
+    if kernel:
         data_rows = [row - row_off + d for row in df_temp.row for d in row_dirs]
         data_cols = [col - col_off + d for col in df_temp.col for d in col_dirs]
         
         # Get the data values and stats for each kernel
         vals = ar[data_rows, data_cols].reshape(len(df_temp), len(val_cols))
     
-    # Make a df from the array and from an array of stats for each kernel
-    df_vals = pd.DataFrame(vals, columns=val_cols, index=df_temp.index)
-    df_stats = pd.DataFrame(calc_row_stats(vals, data_type, var_name, nodata), index=df_temp.index)
-    
-    # Add the new values and stats to the input df 
-    df.ix[df[file_col] == filepath, var_name] = df_stats[var_name]
-    stat_cols = list(df_stats.columns)
-    df_vals[stat_cols] = df_stats
-    #df_vals[file_col] = df_temp[file_col]
-    
+        # Make a df from the array and from an array of stats for each kernel
+        df_vals = pd.DataFrame(vals, columns=val_cols, index=df_temp.index)
+        df_stats = pd.DataFrame(calc_row_stats(vals, data_type, var_name, nodata), index=df_temp.index)
+        
+        # Add the new values and stats to the input df 
+        df.ix[df[file_col] == filepath, var_name] = df_stats[var_name]
+        stat_cols = list(df_stats.columns)
+        df_vals[stat_cols] = df_stats
+        #df_vals[file_col] = df_temp[file_col]
+        
+    else:
+        vals = {var_name: ar[df_temp.row - row_off, df_temp.col - col_off]}
+        df_vals = pd.DataFrame(vals, index=df_temp.index)
+        
     return df_vals 
 
 

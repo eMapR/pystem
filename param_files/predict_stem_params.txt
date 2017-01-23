@@ -20,13 +20,13 @@ pctshrub_450	1	pctshrub_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_450m
 avgimperv_450	1	avgimperv_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_450m	0
 avgcanopy_450	1	avgcanopy_450m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_450m	0
 
-model_dir; /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161120_2038
-train_params; /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161120_2038/train_stem_regressor_params.txt
+model_dir; /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161121_1950
+train_params; /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161121_1950/train_stem_regressor_params.txt
 mosaic_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
-support_size; 400000, 300000
+support_size; 800000, 500000
 n_tiles; 25, 15
 nodata; 255
-out_dir;  /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161120_2038
+out_dir;  /vol/v2/stem/ebird/models/p_melanocephalus_res1yr_20161121_1950
 
 Optional parameters
 constant_vars; YEAR:2007, DAY:167, TIME:7, EFFORT_HRS:1

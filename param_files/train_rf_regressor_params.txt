@@ -1,0 +1,13 @@
+Paramater File for train_rf_regressor.py
+
+target_col; p_melanocephalus
+sample_txt; /vol/v2/stem/ebird/samples/p_melanocephalus_res1yr_20161201_1231/erd_v5_Pheucticus_melanocephalus_predictors_2012_only.txt
+var_txt; /vol/v2/stem/ebird/predict_rf_params/var_text_ebird_p_melanocephalus.txt
+out_dir; /vol/v2/stem/ebird/models
+
+Optional parameters
+n_trees; 200
+n_jobs; 30
+constant_vars; EFFORT_HRS
+out_dirname; p_melanocephalus_2012
+inventory_txt; /vol/v2/stem/ebird/models/model_info.txt

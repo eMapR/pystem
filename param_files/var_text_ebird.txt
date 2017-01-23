@@ -1,0 +1,18 @@
+var_name	data_band	search_str	basepath	by_tsa	nodata	path_filter
+elevation	1	dem_CAORWA.bsq	/vol/v1/general_files/datasets/spatial_data/DEM/	0	-9999
+imperv	1	imperv_vote_{0}.bsq	/vol/v2/stem/imperv/time_series/*	0	255
+pctbareground_75	1	pctbareground_75m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_75m	0	255
+pctshrub_75	1	pctshrub_75m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_75m	0	255
+avgimperv_75	1	avgimperv_75m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_75m	0	255
+avgcanopy_75	1	avgcanopy_75m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_75m	0	255
+pctbareground_225	1	pctbareground_225m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctbareground_225m	0	255
+pctdeciduous_225	1	pctdeciduous_225m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctdeciduous_225m	0	255
+pctconiferous_225	1	pctconiferous_225m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctconiferous_225m	0	255
+pctshrub_225	1	pctshrub_225m_{0}.bsq	/vol/v2/stem/ebird/predictors/pctshrub_225m	0	255
+avgimperv_225	1	avgimperv_225m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgimperv_225m	0	255
+avgcanopy_225	1	avgcanopy_225m_{0}.bsq	/vol/v2/stem/ebird/predictors/avgcanopy_225m	0	255
+temp_max	1	avg_annual_tmax.tif	/vol/v2/stem/ebird/predictors/temp_max	0	32767
+temp_min	1	avg_annual_tmin.tif	/vol/v2/stem/ebird/predictors/temp_min	0	32767
+precip	continuous	1	avg_annual_precip.tif	/vol/v2/stem/ebird/predictors/precip	0	32767
+ecoregion	1	ecoregion_l3.tif	/vol/v2/stem/ebird/predictors/ecoregion	0	255
+population	1	population.tif	/vol/v2/stem/ebird/predictors/population	0	65535

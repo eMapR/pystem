@@ -1,0 +1,9 @@
+Parameter file for evaluate_prediction.py
+
+in_raster; T:\\ResMgmt\\WAGS\\Geology\\Geohazards\\Susceptibility\\Models\\Random_Forest\\susceptibility_20160905_1543\\final_susceptibility_20160905_1543.tif
+nodata; -9999
+sample_txt; T:\\ResMgmt\\WAGS\\Geology\\Geohazards\\Susceptibility\\Samples\\samples60000_20160905_1538_5m\\samples_test_60000_20160905_1538_5m.txt
+val_col; is_slide
+
+Optional parameters
+inventory_txt; 

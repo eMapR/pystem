@@ -205,7 +205,7 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     #filtered = filtered.astype(array_dtype)
     if 'out_nodata' in inputs: nodata = int(inputs['out_nodata'])
     filtered[np.isnan(filtered) | ~mask] = nodata
-    array_to_raster(filtered, tx, prj, driver, out_path, gdal.GDT_Int16, nodata)
+    array_to_raster(filtered, tx, prj, driver, out_path, gdal.GDT_Byte, nodata)
     del ar, filtered, tiles, args, p
     
     print 'Total time: %.1f minutes' % ((time.time() - t0)/60)

@@ -1,0 +1,14 @@
+
+Paramater File for train_rf_regressor.py
+
+train_params; /vol/v2/stem/ebird/models/p_melanocephalus_2012_20161213_1356/train_rf_regressor_params.txt
+var_txt; /vol/v2/stem/ebird/predict_rf_params/var_text_ebird_p_melanocephalus.txt
+mask_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
+nodata; 255
+rf_path; /vol/v2/stem/ebird/models/p_melanocephalus_2012_20161213_1356/regressor_model_p_melanocephalus_2012_20161213_1356
+out_dir; /vol/v2/stem/ebird/models/p_melanocephalus_2012_20161213_1356
+
+Optional parameters
+n_pieces; 20
+constant_vars; EFFORT_HRS:1
+test_params; /vol/v2/stem/param_files/evaluate_ebird_params.txt

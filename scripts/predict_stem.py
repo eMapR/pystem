@@ -117,11 +117,11 @@ def main(params, inventory_txt=None, constant_vars=None):
     
     # Loop through each set and generate predictions
     t0 = time.time()
-    for c, (set_id, row) in enumerate(df_sets.iterrows()):
+    for c, (set_id, row) in enumerate(df_sets.ix[286:].iterrows()):
         t1 = time.time()
         with open(row.dt_file, 'rb') as f: 
             dt_model = pickle.load(f)
-        print '\nPredicting for set %s of %s' % (c + 1, total_sets)
+        print '\nPredicting for set %s of %s' % (c + 286, total_sets)
         ar_coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
         ar_predict = stem.predict_set(set_id, df_var, mosaic_ds, ar_coords, 
                                  mosaic_tx, xsize, ysize, dt_model, nodata,
@@ -150,7 +150,7 @@ def main(params, inventory_txt=None, constant_vars=None):
     out_txt = os.path.join(out_dir, '%s_importance.txt' % file_stamp)
     importance.to_csv(out_txt, sep='\t')#'''
     
-    ds = gdal.Open(os.path.join(model_dir, '%s_vote.bsq' % file_stamp))
+    '''ds = gdal.Open(os.path.join(model_dir, '%s_vote.bsq' % file_stamp))
     ar_vote = ds.ReadAsArray()
     ds = None
     ds = gdal.Open(os.path.join(model_dir, '%s_mean.bsq' % file_stamp))

@@ -5,10 +5,13 @@ import re
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib import style
 from datetime import datetime
 
 import randomforest as forest
 
+
+style.use('ggplot')    
 
 def test(out_dir, x_train, y_train, max_trees, step):
     ''' Make a plot for sample_txt of number of trees vs OOB error rates '''
@@ -19,9 +22,10 @@ def test(out_dir, x_train, y_train, max_trees, step):
     n_tests = max_trees / step
 
     for i, n in enumerate(n_trees):
-        print 'Testing %s of %s models' % (i + 1, n_tests)
         rf_model = forest.train_rf_regressor(x_train, y_train, ntrees=n)
+        #import pdb; pdb.set_trace()
         oob_errors.append(1 - rf_model.oob_score_)
+        print 'Testing %s of %s models with %s trees: %.3f' % (i + 1, n_tests, n, rf_model.oob_score_)
 
     plt.plot(n_trees, oob_errors, '-')
     plt.axis([0, max_trees, 0, 1])
@@ -35,13 +39,11 @@ def test(out_dir, x_train, y_train, max_trees, step):
     print 'Plot PNG written to : ', out_png, '\n'
 
 
-def main(params):
+def main(params, constant_vars=[]):
 
     # Read params and make variables from text
     inputs = forest.read_params(params)
-    print inputs
     for i in inputs:
-        print i, inputs[i]
         exec ("{0} = str({1})").format(i, inputs[i])
 
     # Check that variables were specified in params
@@ -61,14 +63,20 @@ def main(params):
         msg = 'var_text path specified does not exist:\n%s\n\n' % var_txt
         raise IOError(msg)
     df_var = pd.read_csv(var_txt, sep='\t', index_col='var_name')
-
+    
+    if 'constant_vars' in inputs:
+        constant_vars = sorted([i.strip() for i in constant_vars.split(',')])
+        
     df_train = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
-    predict_cols = sorted(np.unique([c for c in df_train.columns for v in df_var.index if v in c]))
-    x_train = df_train.reindex(columns=predict_cols)
+    predict_cols = sorted(np.unique([c for c in df_train.columns for v in df_var.index if v in c] + constant_vars))
+    
     y_train = df_train[target_col]
-
+    x_train = df_train.reindex(columns=predict_cols)
+    
+    
     out_dir = os.path.dirname(sample_txt)
     test(out_dir, x_train, y_train, max_trees, step)
+    shutil.copy2(var_txt, out_dir)
 
 
 if __name__ == '__main__':

@@ -27,12 +27,14 @@ from gdalconst import *
 from sklearn import tree
 from multiprocessing import Pool
 from datetime import datetime
+from sklearn import metrics
 import cPickle as pickle
 import pandas as pd
 import numpy as np
 
 # Import ancillary scripts
 import mosaic_by_tsa as mosaic
+import evaluation as ev
 
 gdal.UseExceptions()
 warnings.filterwarnings('ignore')
@@ -262,6 +264,7 @@ def get_obs_within_sets(df_train, df_sets, min_obs, pct_train=None):
     contain >= min_obs.
     '''
     # Split train and test sets if pct_train is specified
+    df_test = None
     if pct_train:
         df_train, df_test = split_train_test(df_train, pct_train)
     
@@ -305,7 +308,7 @@ def get_obs_within_sets(df_train, df_sets, min_obs, pct_train=None):
     df_oob = pd.concat(oob_list)
     df_oob = df_oob[df_oob.set_id.isin(keep_sets)]
     
-    return df_train, df_sets, df_oob, df_drop
+    return df_train, df_sets, df_oob, df_drop, df_test
     
 
 def coords_to_shp(df, prj_shp, out_shp):
@@ -496,7 +499,7 @@ def get_gsrd(extent_ras, cell_size, support_size, n_sets, df_train, min_obs, tar
     t1 = time.time()
     #if pct_train: 
         #df_train, df_test = split_train_test(df_train, pct_train)
-    df_train, df_sets, df_oob, df_drop = get_obs_within_sets(df_train, df_sets, min_obs, pct_train)
+    df_train, df_sets, df_oob, df_drop, df_test = get_obs_within_sets(df_train, df_sets, min_obs, pct_train)
         
     set_shp = os.path.join(out_dir, 'gsrd_sets.shp')
     coords_to_shp(df_sets, shp, set_shp)
@@ -519,8 +522,9 @@ def get_gsrd(extent_ras, cell_size, support_size, n_sets, df_train, min_obs, tar
     train_txt = os.path.join(out_txt.replace('.txt', '_train.txt'))
     #test_txt = train_txt.replace('train', 'test')
     df_train.to_csv(train_txt, sep='\t', index=False)
-    df_oob.to_csv(train_txt.replace('_train.txt', '_oob.txt'), sep='\t')
-    #df_sets.to_csv(train_txt.replace('_train.txt', '_sets.txt'), sep='\t', index=False)
+    df_oob.to_csv(out_txt.replace('.txt', '_oob.txt'), sep='\t')
+    if len(df_test) > 0:
+        df_test.to_csv(out_txt.replace('.txt', '_test.txt'), sep='\t')
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     print 'Train and test dfs written to:\n', os.path.dirname(out_txt), '\n'
@@ -661,7 +665,6 @@ def get_oob_rates(df_sets, df_oob, err_threshold, target_col, predict_cols, min_
         oob_predictors = this_oob[predict_cols]
         oob_rate = calc_oob_rate(dt, oob_samples, oob_predictors, err_threshold)
         df_sets.ix[i, 'oob_rate'] = oob_rate
-        print i, oob_rate
     low_oob = df_sets[df_sets.oob_rate < min_oob]
     
     return df_sets, low_oob
@@ -871,7 +874,7 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, nodata_mask, 
 
 def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, constant_vars=None):
     '''
-    Return a predicted array for set with id, set_ind
+    Return a predicted array for set with id==set_id
     '''
     # Get an array of tsa_ids within the bounds of ar_coords
     tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, ar_coords, mosaic_tx,
@@ -890,13 +893,13 @@ def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, d
     del tsa_ar #Release resources from the tsa array
     
     t0 = time.time()
-    nodata_mask = np.any(~(ar_predict==nodata), axis=1)
+    nodata_mask = np.all(~(ar_predict==nodata), axis=1)
     ''' I've tried to predict in parallel here but it doesn't speed things up'''
-    #p = Pool(40)
-    #in_pieces = np.array_split(ar_predict[nodata_mask], 40)
-    #out_pieces = p.map(par_predict, [(dt, chunk) for chunk in in_pieces])
+    '''p = Pool(20)
+    in_pieces = np.array_split(ar_predict[nodata_mask], 20)
+    out_pieces = p.map(par_predict, [(dt, chunk) for chunk in in_pieces])
     #import pdb; pdb.set_trace()
-    #predictions = np.concatenate(out_pieces)
+    predictions = np.concatenate(out_pieces)'''
 
     predictions = dt.predict(ar_predict[nodata_mask]).astype(dtype)
     ar_prediction = np.full(ar_predict.shape[0], nodata, dtype=dtype)
@@ -1266,7 +1269,7 @@ def get_nonforest_mask(lc_path, ag_path, lc_vals, ag_vals):
 
 def mask_array(ar, mask, tx_ar, tx_mask, mask_val=0):
     '''
-    Set ar == 0 where mask is true
+    Set ar == mask_val where mask is true
     '''
     
     ar_ul = tx_ar[0], tx_ar[3]
@@ -1652,7 +1655,6 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     mask = mosaic_ds.ReadAsArray() != mosaic_nodata
     empty_tiles = find_empty_tiles(df_tiles, mask, mosaic_tx)
     mosaic_ds = None
-    mask = None
     print '%s empty tiles found of %s total tiles\n%.1f minutes\n' %\
     (len(empty_tiles), total_tiles, (time.time() - t1)/60)
     # Select only tiles that are not empty
@@ -1686,10 +1688,6 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         #   tile size will be slightly different
         this_size = abs(t_row.lr_y - t_row.ul_y), abs(t_row.lr_x - t_row.ul_x)
         df_these_sets = get_overlapping_sets(df_sets, t_row, this_size, support_size)
-         
-        ''' delete '''
-        #df_these_sets.to_csv(out_txt % t_ind, sep='\t')
-        #continue
         
         rc = df_tiles_rc.ix[t_ind]
         this_size = rc.lr_r - rc.ul_r, rc.lr_c - rc.ul_c
@@ -1774,10 +1772,10 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         #ar_wtmn_10[ul_r : lr_r, ul_c : lr_c] = this_wtmn_10
         #ar_wtmn_20[ul_r : lr_r, ul_c : lr_c] = this_wtmn_20
     
-    # Mask arrays
-    #mask, tx_mask = get_nonforest_mask(lc_path, ag_path, lc_vals, ag_vals)
-    #mask_array(ar_mean, mask, mosaic_tx, tx_mask)
-    #mask_array(ar_vote, mask, mosaic_tx, tx_mask)
+    #Mask arrays
+    ar_mean[~mask] = nodata
+    ar_impr[~mask] = nodata
+    ar_stdv[~mask] = nodata * 100
     
     # Write final rasters to disk
     out_template = os.path.join(out_dir, file_stamp + '_%s.bsq')
@@ -1788,7 +1786,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     #mosaic.array_to_raster(ar_vote, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)   
     
     out_path = out_template % 'stdv'
-    mosaic.array_to_raster(ar_stdv, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
+    mosaic.array_to_raster(ar_stdv, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata * 100)
     
     #out_path = out_path.replace('stdv', 'countagg')
     #mosaic.array_to_raster(ar_coun, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
@@ -1810,6 +1808,140 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     
     ar_vote = None
     return ar_mean, ar_vote, pct_import, df_sets#"""
+    
+
+def evaluate_ebird(sample_txt, ar, tx, cell_size, target_col, n_per_cell, n_trials=50, year=None):
+    t0 = time.time()
+    
+    df_test = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
+    #df_test = pd.concat([df_test[df_test[target_col] == 1].drop_duplicates(subset=['row', 'col']), df_test[df_test[target_col] == 0]])
+    #df_test.drop_duplicates(subset=[target_col, 'row', 'col'], inplace=True)
+
+    xsize, ysize = ar.shape
+    df_test['predicted'] = ar[df_test.row, df_test.col]
+    df_test = df_test[df_test.predicted != 255]
+    if year:
+        df_test = df_test[df_test.YEAR == year]
+    
+    # Get bounds for cells in a GSRD
+    ul_x, x_res, _, ul_y, _, y_res = tx
+    lr_x = xsize * x_res/abs(x_res)
+    lr_y = ysize * y_res/abs(y_res)
+    min_x = min([ul_x, lr_x])
+    max_x = max([ul_x, lr_x])
+    min_y = min([ul_y, lr_y])
+    max_y = max([ul_y, lr_y])
+    cells = generate_gsrd_grid(cell_size, min_x, min_y, max_x, max_y, x_res, y_res)
+    
+    
+    # Get all unique sample locations within each cell
+    print 'Getting samples within each cell...'
+    t1 = time.time()
+    locations = []
+    for i, (ul_x, ul_y, lr_x, lr_y) in enumerate(cells):
+        # Get all samples within this cell
+        df_temp = df_test[
+                        (df_test.x > min([ul_x, lr_x])) &
+                        (df_test.x < max([ul_x, lr_x])) &
+                        (df_test.y > min([ul_y, lr_y])) &
+                        (df_test.y > max([ul_y, lr_y]))
+                        ]
+        # Get all unique location
+        unique = [(rc[0],rc[1]) for rc in df_temp[['row','col']].drop_duplicates().values]
+        locations.append([i, np.array(unique)])
+        #locations.append([i, df_temp.index])
+    print '%.1f seconds\n' % (time.time() - t1)
+    
+    # Run n_trials from random samples
+    print 'Calculating accuracy for %s trials...' % n_trials
+    t1 = time.time()
+    results = []
+    used_idx = []
+    roc_curves = []
+    for i in range(n_trials):
+        # Get n_per_cell random samples from each cell
+        random_locations = []
+        for i, l in locations:
+            if len(l) < n_per_cell: 
+                continue
+            #random_locations.extend(l[random.sample(range(len(l)), n_per_cell)])
+            random_locations.extend(random.sample(l, n_per_cell))
+        rows, cols = zip(*random_locations)
+        #idx = []
+        #for row, col in random_locations:
+        #    idx.extend(df_test[(df_test.row == row) & (df_test.col == col)].index.tolist())
+        df_samples = df_test[df_test.row.isin(rows) & df_test.col.isin(cols)]
+        #df_samples = df_test.ix[random_locations]
+        used_idx.extend(df_samples.index.tolist())
+        t_vals = df_samples[target_col]
+        p_vals = df_samples.predicted/100.0
+        
+        # Calc rmspe, rmspe for positive samples, rmspe for neg. samples, and auc
+        try:
+            auc = round(metrics.roc_auc_score(t_vals, p_vals), 3)
+            this_roc_curve = metrics.roc_curve(t_vals, p_vals)
+            roc_curves.append(this_roc_curve)
+        except:
+            auc = 0
+        r2 = metrics.r2_score(t_vals, p_vals)
+        ac, ac_s, ac_u, ssd, spod = ev.calc_agree_coef(t_vals, p_vals, t_vals.mean(), p_vals.mean())
+        rmse = ev.calc_rmse(t_vals, p_vals)
+        false_mask = t_vals == 0
+        rmse_n = ev.calc_rmse(t_vals[false_mask], p_vals[false_mask])
+        rmse_p = ev.calc_rmse(t_vals[~false_mask], p_vals[~false_mask])
+        
+        
+        results.append({'ac': ac,
+                        'ac_s': ac_s,
+                        'ac_u': ac_u,
+                        'r2': r2,
+                        'rmse': rmse,
+                        'rmse_n': rmse_n,
+                        'rmse_p': rmse_p,
+                        'auc': auc
+                       })
+    print '%.1f seconds\n' % (time.time() - t1)
+                       
+    df = pd.DataFrame(results)
+    df_samples = df_test.ix[np.unique(used_idx)]
+    
+    return df, df_samples, roc_curves
+    
+
+def evaluate_by_lc(df, ar, lc_path, target_col, lc_classes=None, ar_nodata=255):
+    
+    #df = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
+    
+    ds = gdal.Open(lc_path)
+    ar_lc = ds.ReadAsArray()
+    ds = None
+    
+    df['predicted'] = ar[df.row, df.col]/100.0
+    df = df[df.predicted != ar_nodata]
+    df['lc_class'] = ar_lc[df.row, df.col]
+    if not lc_classes:
+        lc_classes = df.lc_class.unique()
+    
+    df_stats = pd.DataFrame(columns=['auc','rmse', 'lc_class'])
+    for lc in lc_classes:
+        df_lc = df[df.lc_class == lc]
+        if len(df_lc) == 0:
+            print '\nNo samples found in land cover class %s' % lc
+            continue
+        t_vals = df_lc[target_col]
+        p_vals = df_lc.predicted
+        if t_vals.min() == t_vals.max():
+            print '\nOnly one class present for class %s. Skipping...\n' % lc
+            continue
+        n_pos = len(t_vals[t_vals == 1])
+        n_neg = len(t_vals[t_vals == 0])
+        auc = metrics.roc_auc_score(t_vals, p_vals)
+        rmse = ev.calc_rmse(t_vals, p_vals)
+        lc_dict = {'lc_class': lc, 'rmse': rmse,'auc': auc, 'n_pos': n_pos, 'n_neg': n_neg}
+        df_stats = df_stats.append(pd.DataFrame([lc_dict],
+                                                 index=[lc]))
+    df_stats.set_index('lc_class', inplace=True)
+    return df_stats.sort_index()
 
 
 def predict_set_from_disk(df_sets, set_id, params):

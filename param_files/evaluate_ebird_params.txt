@@ -1,0 +1,13 @@
+Parameters for evaluate_stem.py
+
+target_col; p_melanocephalus
+sample_txt; /vol/v2/stem/ebird/samples/p_melanocephalus_res1yr_20161201_1231/erd_v5_Pheucticus_melanocephalus_predictors_test.txt
+cell_size; 25000, 18750
+n_per_cell; 2
+n_trials; 200
+
+Optional parameters
+inventory_txt; /vol/v2/stem/ebird/models/model_info.txt
+year; 2012
+lc_path; /vol/v1/proj/lst/outputs/models/randomforest/rfprediction_mosaic/yearly/lst_run1_prediction_voting_lulc_RF_mosaic_2012.bsq
+

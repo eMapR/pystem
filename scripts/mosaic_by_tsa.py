@@ -80,9 +80,9 @@ def find_file(basepath, tsa_str, search_str, path_filter=None):
             paths.extend(these_paths)
     
     # If path filter was specified, remove any paths that contain it
-    if not path_filter == '':
+    '''if not path_filter == '':
         [paths.remove(p) for p in paths if fnmatch.fnmatch(p, path_filter)]
-        #paths = [p for p in paths if fnmatch.fnmatch(p, path_filter)]
+        #paths = [p for p in paths if fnmatch.fnmatch(p, path_filter)]'''
     
     if len(paths) > 1:
         '''print 'Multiple files found for tsa: ' + tsa_str
@@ -261,7 +261,7 @@ def array_to_raster(array, tx, prj, driver, out_path, dtype, nodata=None):
 
 #def get_mosaic(mosaic_tx, tsa_ar, tsa_off, ar_coords, tsa_txt,  data_band, files=None, basepath=None, search_str=None, path_filter=None, out_path=None, prj=None, driver=None):
 def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords,  data_band, files=None, **kwargs):
-    
+
     ul_x, ul_y, lr_x, lr_y = ar_coords
 
     tsas = zip(tsa_ids, [int(tsa) for tsa in tsa_ids])
@@ -276,6 +276,7 @@ def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords,  data_band, files=None, **
             print 'Could not find unique file for TSA. Try a different ' +\
             'search string or specify a path filter'
             return None
+        these_files = df.file
     else:
         these_files = [f for f in files for tsa in df['tsa_str'] if tsa in f]
     
@@ -319,8 +320,8 @@ def main(mosaic_path, basepath, search_str, ar_coords, data_band):
     ds_tsa = None
     tsa_ids = np.unique(ar_tsa)
     tsa_strs = ['0' + str(tsa) for tsa in tsa_ids if tsa!=0]
-    
-    ar = get_mosaic(tx_tsa, tsa_strs, ar_tsa, tsa_off, ar_coords, data_band)
+
+    ar = get_mosaic(tx_tsa, tsa_strs, ar_tsa, ar_coords, data_band)
     
     return ar
 
@@ -337,36 +338,43 @@ def main(mosaic_path, basepath, search_str, ar_coords, data_band):
 
 
 """mosaic_path = '/vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq'
-ul_x = -1628643
+'''ul_x = -1628643
 ul_y = 3203960
 lr_x = -1328643
-lr_y = 2803960                                   
-ar_coords = ul_x, ul_y, lr_x, lr_y
-basepath = '/vol/v1/proj/lst/outputs/models/randomforest/rfprediction'
+lr_y = 2803960 '''                                
+
+basepath = '/vol/v1/scenes'
 #basepath = '/vol/v3/scenes'
-search_str = 'lst_run1_prediction_voting_lulc_RF_*2002.tif'
+search_str = '*_mse_split.bsq'
 #search_str = '*2010_*ledaps.bsq'
 path_filter = None
-out_path = '/vol/v2/stem/scripts/testing/tsa_mos_ledaps.bsq'
-data_band = 1
+out_dir = '/home/server/student/homes/shooper'
+data_band = 18
 
 ds = gdal.Open(mosaic_path)
+ar_tsa = ds.ReadAsArray()
 tx = ds.GetGeoTransform()
 xsize = ds.RasterXSize
 ysize = ds.RasterYSize
-ar, off = extract_kernel(ds, 1, ar_coords, tx, xsize, ysize)
+ul_x, x_res, _, ul_y, _, y_res = tx
+ar_coords = [ul_x,
+             ul_y,
+             ul_x + (xsize * x_res), 
+ul_y + (ysize * y_res)]
+#ar, off = extract_kernel(ds, 1, ar_coords, tx, xsize, ysize)
 
 prj = ds.GetProjection()
 driver = ds.GetDriver()
 m_ulx, x_res, x_rot, m_uly, y_rot, y_res = tx
 tx1 = ul_x, x_res, x_rot, ul_y, y_rot, y_res
 ds = None
-out_dir = '/vol/v2/stem/scripts/testing'
-out_path = os.path.join(out_dir, 'tsa_%s_test.bsq' % 341)
-array_to_raster(ar, tx1, prj, driver, out_path, GDT_Int32, nodata=0)
+#out_dir = '/vol/v2/stem/scripts/testing'
+out_path = os.path.join(out_dir, 'mse_CAORWA.bsq')
 
-#ar = main(mosaic_path, basepath, search_str, ar_coords, data_band)"""
-
+ar = main(mosaic_path, basepath, search_str, ar_coords, data_band)
+nodata_mask = ar_tsa == 0
+ar[nodata_mask] == -9999
+array_to_raster(ar, tx, prj, driver, out_path, GDT_Int16, nodata=-9999)#"""
 
     
     

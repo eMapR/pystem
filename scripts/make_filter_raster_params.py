@@ -8,7 +8,7 @@ Created on Sun Oct 23 20:53:21 2016
 import os
 
 
-def write_area_params(raster_path, years, res, vals, out_dir):
+def write_area_params(raster_path, years, res, vals, n_jobs, out_dir):
     for val in vals:
         name = vals[val]
         for r in res:
@@ -30,14 +30,14 @@ def write_area_params(raster_path, years, res, vals, out_dir):
                     txt.write('\n')
                     txt.write('Optional parameters\n')
                     txt.write('n_tiles; 25, 15\n')
-                    txt.write('n_jobs; 25\n')
+                    txt.write('n_jobs; %s\n' % n_jobs)
                     txt.write('nodata; 0\n')
                     txt.write('kernel_type; circle\n')
                     txt.write('out_nodata; 255\n')
                     txt.write('filter_value; %s\n' % val)
 
 
-def write_avg_params(raster_path, years, res, names, out_dir):
+def write_avg_params(raster_path, years, res, names, n_jobs, out_dir):
 
     for name in names:
         for r in res:
@@ -59,7 +59,7 @@ def write_avg_params(raster_path, years, res, names, out_dir):
                     txt.write('\n')
                     txt.write('Optional parameters\n')
                     txt.write('n_tiles; 25, 15\n')
-                    txt.write('n_jobs; 25\n')
+                    txt.write('n_jobs; %s\n' % n_jobs)
                     txt.write('nodata; 255\n')
                     txt.write('kernel_type; circle\n')
 
@@ -67,14 +67,15 @@ def write_avg_params(raster_path, years, res, names, out_dir):
 
 
 out_dir = '/vol/v2/stem/ebird/predictors/param_files'
-years = range(2002, 2013)[::-1]
-res = ['150m', '450m']
+years = range(2002, 2008)[::-1]
+res = ['225m']
+n_jobs = 30
 vals = {11: 'pctwater', 12: 'pctsnow', 23: 'pcturban', 31: 'pctbareground', 41: 'pctdeciduous', 42: 'pctconiferous', 52: 'pctshrub'}
 raster_path = '/vol/v1/proj/lst/outputs/models/randomforest/rfprediction_mosaic/yearly/lst_run1_prediction_voting_lulc_RF_mosaic_%s.bsq'
-#write_area_params(raster_path, years, res, vals, out_dir)
+#write_area_params(raster_path, years, res, vals, n_jobs, out_dir)
 
 raster_path = '/vol/v2/stem/{0}/time_series/{1}/{0}_vote_{1}.bsq'   
-names = ['canopy', 'imperv']   
-#write_avg_params(raster_path, years, res, names, out_dir)         
+names = ['imperv']  
+write_avg_params(raster_path, years, res, names, n_jobs, out_dir)         
                 
     
