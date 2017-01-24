@@ -65,13 +65,23 @@ def pct_nonzero(ar):
     pct = np.count_nonzero(ar)/n_pixels * 100
     
     return pct
+    
+
+def is_equal_to(ar, center_idx):
+    
+    center_val = ar[center_idx]
+    ar = ar[~np.isnan(ar)]
+    if np.all(ar == center_val):
+        return 1
+    else:
+        return 0
 
 
 def par_filter(args):
     
     t0 = time.time()
-    ind, ar, func, kernel, i, n_tiles = args
-    ar = ndi.generic_filter(ar, func, footprint=kernel)
+    ind, ar, func, kernel, extra_args, i, n_tiles = args
+    ar = ndi.generic_filter(ar, func, footprint=kernel, extra_arguments=extra_args)
     print 'Time for tile %s of %s: %.1f minutes' % (i, n_tiles, ((time.time() - t0)/60))
 
     return ind, ar
@@ -99,6 +109,7 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     if 'n_tiles' in inputs: n_tiles = [int(n) for n in inputs['n_tiles'].split(',')]
     if 'nodata' in inputs: nodata = int(inputs['nodata'])
     
+    extra_args = () # The default for ndi.generic_filter 'extra_args' is an empty tuple
     if 'average' in function.lower():
         func = np.nanmean
     elif 'mode' in function.lower():
@@ -110,6 +121,11 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
             'Try specifying filter_value in parameters file.')
         else:
             filter_value = int(inputs['filter_value'])
+    elif 'equal' in function.lower():
+        func = is_equal_to
+        center_idx = kernel_size**2/2
+        extra_args = tuple([center_idx])
+        
     else:
         sys.exit('Could not find filtering function for alias: %s' % function)
     
@@ -174,11 +190,11 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     args = []
     for i, (ind, r) in enumerate(df_buf.iterrows()):
         this_ar = ar[r.ul_r : r.lr_r, r.ul_c : r.lr_c]
-        args.append([ind, this_ar, func, kernel, i + 1, n_full_tiles])
+        args.append([ind, this_ar, func, kernel, extra_args, i + 1, n_full_tiles])
         #arrays.append([i, this_ar])
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
-    print 'Filtering chunks in parallel...'
+    print 'Filtering chunks in parallel with %s jobs...' % n_jobs
     p = Pool(n_jobs)
     tiles = p.map(par_filter, args, 1)
     print '\nTotal time for filtering: %.1f minutes\n' % ((time.time() - t1)/60)
@@ -205,7 +221,12 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     #filtered = filtered.astype(array_dtype)
     if 'out_nodata' in inputs: nodata = int(inputs['out_nodata'])
     filtered[np.isnan(filtered) | ~mask] = nodata
-    array_to_raster(filtered, tx, prj, driver, out_path, gdal.GDT_Byte, nodata)
+    
+    if ar.max() <= 255 and ar.min() >= 0:
+        gdal_dtype = gdal.GDT_Byte
+    else:
+        gdal_dtype = gdal.GDT_UInt16
+    array_to_raster(filtered, tx, prj, driver, out_path, gdal_dtype, nodata)
     del ar, filtered, tiles, args, p
     
     print 'Total time: %.1f minutes' % ((time.time() - t0)/60)
