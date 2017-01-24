@@ -39,10 +39,8 @@ def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None):
     snap_inds, in_inds = get_offset_array_indices(ar_snap.shape, ar_in.shape, offset)
     np_dtype = ar_in.dtype
     ar = np.full(ar_snap.shape, out_nodata, dtype=np_dtype)
-    in_nodata = ar_in.min()
     ar_in[ar_in == in_nodata] = out_nodata
     ar[snap_inds[0]:snap_inds[1], snap_inds[2]:snap_inds[3]] = ar_in[in_inds[0]:in_inds[1], in_inds[2]:in_inds[3]]
-    ar[ar > 60000] = out_nodata - 1
     print '%.1f seconds\n' % (time.time() - t1)
     
     if ar.max() <= 255 and ar.min() >= 0:
@@ -51,7 +49,7 @@ def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None):
         gdal_dtype = gdal.GDT_UInt16
     
     if not out_path: out_path = in_raster
-    array_to_raster(ar * 10, tx_snap, prj, driver, out_path, gdal_dtype, out_nodata)
+    array_to_raster(ar, tx_snap, prj, driver, out_path, gdal_dtype, out_nodata)
     
     print '\nTotal time to snap raster: %.1f seconds\n' % (time.time() - t0)
 
