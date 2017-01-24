@@ -49,12 +49,29 @@ def parse_bins(bin_str):
     return bins
 
 
-def get_stratified_sample(raster_path, col_name, data_band, n_samples, bins, pct_train=None, nodata=None, zero_inflation=None, data_type='continuous'):
+def extract_by_kernel(ar, rows, cols, data_type, col_name, nodata):
+    
+    row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
+    col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
+    kernel_rows = [row + d + 1 for row in rows for d in row_dirs]
+    kernel_cols = [col + d + 1 for col in cols for d in col_dirs]
+    
+    ar_buf = np.full([dim + 2 for dim in ar.shape], nodata, dtype=np.int32)
+    ar_buf[1:-1, 1:-1] = ar
+    del ar
+    
+    kernel_vals = ar_buf[kernel_rows, kernel_cols].reshape(len(rows), len(row_dirs))
+    train_stats = pd.DataFrame(extract.calc_row_stats(kernel_vals, data_type, col_name, nodata))
+    vals = train_stats[col_name].astype(np.int32)
+    
+    return vals
+    
+
+def get_stratified_sample(raster_path, col_name, data_band, n_samples, bins, pct_train=None, nodata=None, zero_inflation=None, data_type='continuous', kernel=False):
     '''
     Return a dataframe of stratified randomly sampled pixels from raster_path
     '''
     print 'Reading the raster_path... %s\n' % datetime.now()
-    t0 = time.time()
     ds = gdal.Open(raster_path)
     tx = ds.GetGeoTransform()
     band = ds.GetRasterBand(data_band)
@@ -92,8 +109,7 @@ def get_stratified_sample(raster_path, col_name, data_band, n_samples, bins, pct
         t1 = time.time()
         this_min, this_max = b
         print 'Getting random samples between %s and %s...' % (this_min, this_max)
-        #mask = (ar_data > this_min) & (ar_data <= this_max) & nodata_mask#(ar != nodata)
-        mask = (ar > this_min) & (ar <= this_max) & nodata_mask#(ar != nodata)
+        mask = (ar > this_min) & (ar <= this_max) & nodata_mask
         these_rows = ar_rows[mask]
         these_cols = ar_cols[mask]
         
@@ -128,56 +144,50 @@ def get_stratified_sample(raster_path, col_name, data_band, n_samples, bins, pct
         test_cols.extend(te_cols)
         print '%.1f seconds\n' % (time.time() - t1)
     del tr_rows, tr_cols, te_rows, te_cols
-    # Calculate x and y for later extractions. Then get array values.
+    
+    # If True, extract with 3x3 kernel. Otherwise, just get the vals (row,col)
+    if kernel:
+        train_vals = extract_by_kernel(ar, train_rows, train_cols, data_type, col_name, nodata)
+    else:
+        train_vals = ar[train_rows, train_cols]
+        
+    # Calculate x and y for later extractions
     ul_x, x_res, x_rot, ul_y, y_rot, y_res = tx
-    
-    #train_vals = ar[train_rows, train_cols]
-    row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
-    col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
-    kernel_rows = [row + d + 1 for row in train_rows for d in row_dirs]
-    kernel_cols = [col + d + 1 for col in train_cols for d in col_dirs]
-    
-    ar_buf = np.full([dim + 2 for dim in ar.shape], nodata, dtype=np.int32)
-    ar_buf[1:-1, 1:-1] = ar
-    del ar
-    
-    #kernel_vals = ar[kernel_rows, kernel_cols].reshape(len(train_rows), len(row_dirs))
-    kernel_vals = ar_buf[kernel_rows, kernel_cols].reshape(len(train_rows), len(row_dirs))
-    train_stats = pd.DataFrame(extract.calc_row_stats(kernel_vals, data_type, col_name, nodata))
-    
     train_x = [int(ul_x + c * x_res) for c in train_cols]
     train_y = [int(ul_y + r * y_res) for r in train_rows]
-    #train_vals = ar[train_rows, train_cols]
-    '''df_train = pd.DataFrame(zip(train_x, train_y, train_rows, train_cols,
-                                train_stats[col_name].astype(np.int32)),
-                            columns=['x', 'y', 'row', 'col', col_name])'''
     df_train = pd.DataFrame({'x': train_x,
                              'y': train_y,
                              'row': train_rows,
                              'col': train_cols,
-                             col_name: train_stats[col_name].astype(np.int32)})
+                             col_name: train_vals
+                             })
+                             
+    # If training and testing samples were split, get test vals                    
     df_test = None
     if pct_train:
-        kernel_rows = [row + d for row in test_rows for d in row_dirs]
-        kernel_cols = [col + d for col in test_cols for d in col_dirs]
-        #test_vals = ar[test_rows, test_cols]
-        kernel_vals = ar_buf[kernel_rows, kernel_cols].reshape(len(test_rows), len(row_dirs))
-        test_stats = pd.DataFrame(extract.calc_row_stats(kernel_vals, data_type, col_name, nodata))
+        if kernel:
+            test_vals = extract_by_kernel(ar, train_rows, train_cols, data_type, col_name, nodata)
+        else:
+            test_vals = ar[test_rows, test_cols]
         test_x = [int(ul_x + c * x_res) for c in test_cols]
         test_y = [int(ul_y + r * y_res) for r in test_rows]
-        #test_vals = ar[test_rows, test_cols]
-        df_test = pd.DataFrame(zip(test_x, test_y, test_rows, test_cols, 
-                                   test_stats[col_name].astype(np.int32)),
-                                columns=['x', 'y', 'row', 'col', col_name])
+        df_test = pd.DataFrame({'x': test_x, 
+                                'y': test_y, 
+                                'row': test_rows,
+                                'col': test_cols,
+                                col_name: test_vals
+                                })
     
     return df_train, df_test
 
 
-def main(params, data_band=1, nodata=None):
+def main(params, data_band=1, nodata=None, data_type='continuous', kernel=False):
     
+    t0 = time.time()
     data_band = None
     nodata = None
     zero_inflation = None
+    
     # Read params and make variables from each line
     inputs = read_params(params)
     for var in inputs:
@@ -187,7 +197,6 @@ def main(params, data_band=1, nodata=None):
     '''if not os.path.exists(out_dir):
         print 'Warning: output directory does not exist. Creating directory...'
         os.makedirs(out_dir)'''
-    shutil.copy2(params, out_dir) #Copy the params for reference
     
     # Integerize numeric params
     if 'data_band' in locals(): data_band = int(data_band)
@@ -201,7 +210,10 @@ def main(params, data_band=1, nodata=None):
     bins = parse_bins(bins)
     
     # Generate samples
-    df_train, df_test = get_stratified_sample(raster_path, col_name, data_band, n_samples, bins, pct_train, nodata, zero_inflation)
+    df_train, df_test = get_stratified_sample(raster_path, col_name, data_band,
+                                              n_samples, bins, pct_train, 
+                                              nodata, zero_inflation, data_type,
+                                              kernel)
     df_train['obs_id'] = df_train.index
     
     # Write samples to text file
@@ -224,7 +236,9 @@ def main(params, data_band=1, nodata=None):
         df_test['obs_id'] = df_test.index
         test_txt = out_txt.replace('%s.txt' % stamp, '%s_test.txt' % stamp)
         df_test.to_csv(test_txt, sep='\t', index=False)
-        print 'Test samples written to directory:\n%s\n' % out_dir
+        print 'Test samples written to directory:\n%s' % out_dir
+    
+    print 'Total time: %.1f minutes' % ((time.time() - t0)/60)
         
         
 if __name__ == '__main__':
