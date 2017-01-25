@@ -122,10 +122,11 @@ def vars_to_numbers(cell_size, support_size, sets_per_cell, min_obs, max_feature
     support_size = [int(i) for i in support_size.split(',')]
     sets_per_cell = int(sets_per_cell)
     min_obs = int(min_obs)
-    if '.' in max_features: max_features = float(max_features)
-    else:
-        try: max_features = int(max_features)
-        except: pass
+    if max_features:
+        if '.' in max_features: max_features = float(max_features)
+        else:
+            try: max_features = int(max_features)
+            except: pass
     if pct_train: pct_train = float(pct_train)    
     return cell_size, support_size, sets_per_cell, min_obs, max_features, pct_train
 
@@ -263,7 +264,7 @@ def get_obs_within_sets(df_train, df_sets, min_obs, pct_train=None):
     contain >= min_obs.
     '''
     # Split train and test sets if pct_train is specified
-    df_test = None
+    df_test = pd.DataFrame()
     if pct_train:
         df_train, df_test = split_train_test(df_train, pct_train)
     
@@ -1234,6 +1235,15 @@ def weighted_mean(ar, b, c=5, a=1):
     return np.round(w_mean,0).astype(np.int16)
     
 
+def pct_vote(ar, ar_vote, ar_count):
+    
+    ar_eq = ar == ar_vote
+    ar_sum = ar_eq.sum(axis=2)
+    ar_pct = np.round(ar_sum/ar_count.astype(np.float16) * 100).astype(np.uint8)
+    
+    return ar_pct
+    
+
 def get_nonforest_mask(lc_path, ag_path, lc_vals, ag_vals):
     '''
     Create a boolean mask where lc_path==lc_vals or ag_path==ag_vals.
@@ -1641,11 +1651,12 @@ def par_wmean(args):
 def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size, prediction_dir, df_sets, out_dir, file_stamp, prj, driver, mosaic_nodata=0):
     
     t0 = time.time()
-    ar_mean = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_vote = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_stdv = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_coun = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_impr = np.full((ysize, xsize), nodata, dtype=np.int16)
+    #ar_mean = np.full((ysize, xsize), nodata, dtype=np.int16)
+    ar_vote = np.full((ysize, xsize), nodata, dtype=np.uint8)
+    #ar_stdv = np.full((ysize, xsize), nodata, dtype=np.int16)
+    #ar_coun = np.full((ysize, xsize), nodata, dtype=np.uint8)
+    ar_impr = np.full((ysize, xsize), nodata, dtype=np.uint8)
+    ar_pcvt = np.full((ysize, xsize), nodata, dtype=np.uint8)
     #ar_wtmn_10 = np.full((ysize, xsize), nodata, dtype=np.int16)#'''
     #ar_wtmn_20 = np.full((ysize, xsize), nodata, dtype=np.int16)
     
@@ -1704,64 +1715,66 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         predictions = load_predictions(prediction_dir, df_these_sets, tile_ul, this_size)
         
         # If there are no overalpping sets for this tile, fill the tile with nodata
-        if t_ind in empty_tiles:
+        '''if t_ind in empty_tiles:
             print 'No overlapping sets for this tile'
             continue
-            this_mean = np.full(this_size, nodata, dtype=np.int16)
-            #this_vote = np.full(this_size, nodata, dtype=np.int16)
-            this_stdv = np.full(this_size, nodata, dtype=np.int16)
-            #this_coun = np.full(this_size, nodata, dtype=np.int16)
+            #this_mean = np.full(this_size, nodata, dtype=np.int16)
+            this_vote = np.full(this_size, nodata, dtype=np.int16)
+            #this_stdv = np.full(this_size, nodata, dtype=np.int16)
+            this_coun = np.full(this_size, nodata, dtype=np.int16)
             this_impr = np.full(this_size, nodata, dtype=np.int16)
             #this_wtmn_10 = np.full(this_size, nodata, dtype=np.int16)
-            #this_wtmn_20 = np.full(this_size, nodata, dtype=np.int16)
+            #this_wtmn_20 = np.full(this_size, nodata, dtype=np.int16)'''
         
         # Otherwise, aggregate all overlapping sets for each pixel
-        else:
-            print n_sets, ' Overlapping sets'
-            t2 = time.time()
-            pred_bands = []
-            importance_bands = []
-            for s_ind, s_row in df_these_sets.iterrows():
-                s_row = df_these_sets.ix[s_ind]
-                
-                # Fill tile with prediction
-                ar_pred, tile_inds = predictions[s_ind]
-                pred_band = fill_tile_band(this_size, ar_pred, tile_inds, nodata)
-                pred_bands.append(pred_band)
-                
-                # Get feature with maximum importance and fill tile with that val
-                try:
-                    with open(s_row.dt_file, 'rb') as f: 
-                        dt_model = pickle.load(f)
-                    #max_importance, importance = get_max_importance(dt_model)
-                    #importance_list.append(importance)
-                    ar_import = np.full(ar_pred.shape, s_row.max_importance, dtype=np.int16)
-                    #max_importance = important_features(dt_model, ar_pred, nodata)
-                    import_band = fill_tile_band(this_size, ar_import, tile_inds, nodata)
-                    importance_bands.append(import_band)
-                except Exception as e:
-                    print e
-                    continue#'''
+        #else:
+        print n_sets, ' Overlapping sets'
+        t2 = time.time()
+        pred_bands = []
+        importance_bands = []
+        for s_ind, s_row in df_these_sets.iterrows():
+            s_row = df_these_sets.ix[s_ind]
+            
+            # Fill tile with prediction
+            ar_pred, tile_inds = predictions[s_ind]
+            pred_band = fill_tile_band(this_size, ar_pred, tile_inds, nodata)
+            pred_bands.append(pred_band)
+            
+            # Get feature with maximum importance and fill tile with that val
+            try:
+                with open(s_row.dt_file, 'rb') as f: 
+                    dt_model = pickle.load(f)
+                #max_importance, importance = get_max_importance(dt_model)
+                #importance_list.append(importance)
+                ar_import = np.full(ar_pred.shape, s_row.max_importance, dtype=np.uint8)
+                #max_importance = important_features(dt_model, ar_pred, nodata)
+                import_band = fill_tile_band(this_size, ar_import, tile_inds, nodata)
+                importance_bands.append(import_band)
+            except Exception as e:
+                print e
+                continue#'''
             print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
             
             ar_tile = np.dstack(pred_bands)
             nd_impr = np.dstack(importance_bands)
             del pred_bands, importance_bands#, ar_import
             t3 = time.time()
-            this_mean = np.nanmean(ar_tile, axis=2)
-            #this_vote = mode(ar_tile, axis=2)
-            this_stdv = np.nanstd(ar_tile, axis=2) * 100 #Multiply b/c converting to int
-            #this_coun = np.sum(~np.isnan(ar_tile), axis=2)
+            #this_mean = np.nanmean(ar_tile, axis=2)
+            this_vote = mode(ar_tile, axis=2)
+            #this_stdv = np.nanstd(ar_tile, axis=2) * 100 #Multiply b/c converting to int
+            this_coun = np.sum(~np.isnan(ar_tile), axis=2)
             this_impr = mode(nd_impr, axis=2)
+            this_pcvt = pct_vote(ar_tile, this_vote, this_coun)
             #this_wtmn_10 = weighted_mean(ar_tile, this_vote, c=10)
             #this_wtmn_20 = weighted_mean(ar_tile, this_vote, c=20)
             
-            nans = np.isnan(this_mean)
-            this_mean[nans] = nodata
-            this_stdv[nans] = nodata
+            nans = np.isnan(this_vote)
+            #this_mean[nans] = nodata
+            #this_stdv[nans] = nodata
             this_impr[nans] = nodata
-            #this_vote[nans] = nodata
+            this_vote[nans] = nodata
             #this_coun[nans] = nodata
+            this_pcvt[nans] = nodata
             #this_wtmn_10[nans] = nodata
             #this_wtmn_20[nans] = nodata
             
@@ -1770,35 +1783,42 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         
         # Fill in the tile in the final arrays
         ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[t_ind]
-        ar_mean[ul_r : lr_r, ul_c : lr_c] = this_mean.astype(np.int16)
-        #ar_vote[ul_r : lr_r, ul_c : lr_c] = this_vote.astype(np.int16)
-        ar_stdv[ul_r : lr_r, ul_c : lr_c] = this_stdv.astype(np.int16)
+        #ar_mean[ul_r : lr_r, ul_c : lr_c] = this_mean.astype(np.int16)
+        ar_vote[ul_r : lr_r, ul_c : lr_c] = this_vote.astype(np.uint8)
+        #ar_stdv[ul_r : lr_r, ul_c : lr_c] = this_stdv.astype(np.int16)
         #ar_coun[ul_r : lr_r, ul_c : lr_c] = this_coun
         ar_impr[ul_r : lr_r, ul_c : lr_c] = this_impr
+        ar_pcvt[ul_r : lr_r, ul_c : lr_c] = this_pcvt
         #ar_wtmn_10[ul_r : lr_r, ul_c : lr_c] = this_wtmn_10
         #ar_wtmn_20[ul_r : lr_r, ul_c : lr_c] = this_wtmn_20
     
     #Mask arrays
-    ar_mean[~mask] = nodata
+    #ar_mean[~mask] = nodata
+    ar_vote[~mask] = nodata
     ar_impr[~mask] = nodata
-    ar_stdv[~mask] = nodata * 100
+    #ar_coun[~mask] = nodata
+    ar_pcvt[~mask] = nodata
+    #ar_stdv[~mask] = nodata * 100
     
     # Write final rasters to disk
     out_template = os.path.join(out_dir, file_stamp + '_%s.bsq')
     out_path = out_template % 'mean'
-    mosaic.array_to_raster(ar_mean, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
+    #mosaic.array_to_raster(ar_mean, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
     
     out_path = out_template % 'vote'
-    #mosaic.array_to_raster(ar_vote, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)   
+    mosaic.array_to_raster(ar_vote, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata)   
     
     out_path = out_template % 'stdv'
-    mosaic.array_to_raster(ar_stdv, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata * 100)
+    #mosaic.array_to_raster(ar_stdv, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata * 100)
     
     #out_path = out_path.replace('stdv', 'countagg')
-    #mosaic.array_to_raster(ar_coun, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
+    #mosaic.array_to_raster(ar_coun, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
     
     out_path = out_template % 'importance'
-    mosaic.array_to_raster(ar_impr, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)  
+    mosaic.array_to_raster(ar_impr, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata)  
+    
+    out_path = out_template % 'pct_vote'
+    mosaic.array_to_raster(ar_pcvt, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata) 
     
     #out_path = os.path.join(out_dir, file_stamp + '_weightedmean_10.bsq')
     #mosaic.array_to_raster(ar_wtmn_10, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
@@ -1810,9 +1830,9 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     #return predictions, df_sets, df_train
     #return df_tiles, df_these_sets, ar_mean, ar_tile, ar_out
     #return ar_out
-    del ar_impr, ar_pred, ar_stdv, ar_tile, this_impr, this_mean, this_stdv, #this_vote, #this_wtmn_20, ar_coun, this_coun, this_wtmn_10, ar_wtmn_20, ar_wtmn_10
+    #del ar_impr, ar_pred, ar_stdv, ar_tile, this_impr, this_mean, this_stdv, #this_vote, #this_wtmn_20, ar_coun, this_coun, this_wtmn_10, ar_wtmn_20, ar_wtmn_10
     
-    ar_vote = None
+    ar_mean = None
     return ar_mean, ar_vote, pct_import, df_sets#"""
     
 
