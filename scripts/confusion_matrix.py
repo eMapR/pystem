@@ -11,7 +11,7 @@ import sys
 import pandas as pd
 
 from get_stratified_random_pixels import parse_bins
-from evaluate_cover import confusion_matrix_by_area
+from evaluation import confusion_matrix_by_area
 
 
 def read_params(txt):
@@ -70,7 +70,6 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
         ds_p = gdal.Open(p_path)
         ar_p = ds_p.ReadAsArray()
     ds_t = gdal.Open(t_path)
-    print t_path
     ar_t = ds_t.ReadAsArray()
 
     mask = (ar_p == p_nodata) | (ar_t == t_nodata)#'''

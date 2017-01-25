@@ -84,7 +84,7 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None, year=None):
     
     if len(paths) > 1:
         print 'Multiple files found for tsa: %s' % tsa_str
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         for p in paths:
             print p
         print 'Selecting the first one found...\n'# '''
@@ -155,19 +155,20 @@ def extract_at_xy(df, array, data_tx, val_name):
 
 def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, val_cols, data_type, nodata=None, kernel=False):
     '''
-    Return a df with values from all pixels defined by row, col in df. 
+    Return a dataframe with values from all pixels defined by row, col in df. 
     If row_dirs and col_dirs are defined, get surrounding pixels in a 
     kernel of size row_dirs ** 1/2, col_dirs ** 1/2.
     '''
     row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
     col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
     
-    df_temp = df[df[file_col] == filepath]
+    df_file = df[df[file_col] == filepath]
     
     # If the filepath is an integer, the file could not be found so just
     #   return bogus values that can be picked out later
     if type(filepath) == int:
-        vals = np.full((len(df_temp),len(val_cols)), nodata, dtype=np.int32)
+        vals = np.full((len(df_file),len(val_cols)), nodata, dtype=np.int32)
+        df.ix[df[file_col] == filepath, var_name] = vals
     
     # Otherwise it should be a real filepath
     else:
@@ -180,27 +181,27 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
         row_off = int((tx[3] - mosaic_tx[3])/tx[5])
         col_off = int((tx[0] - mosaic_tx[0])/tx[1])
     
-    if kernel:
-        data_rows = [row - row_off + d for row in df_temp.row for d in row_dirs]
-        data_cols = [col - col_off + d for col in df_temp.col for d in col_dirs]
+        if kernel:
+            data_rows = [row - row_off + d for row in df_file.row for d in row_dirs]
+            data_cols = [col - col_off + d for col in df_file.col for d in col_dirs]
+            
+            # Get the data values and stats for each kernel
+            vals = ar[data_rows, data_cols].reshape(len(df_file), len(val_cols))
         
-        # Get the data values and stats for each kernel
-        vals = ar[data_rows, data_cols].reshape(len(df_temp), len(val_cols))
-    
-        # Make a df from the array and from an array of stats for each kernel
-        df_vals = pd.DataFrame(vals, columns=val_cols, index=df_temp.index)
-        df_stats = pd.DataFrame(calc_row_stats(vals, data_type, var_name, nodata), index=df_temp.index)
-        
-        # Add the new values and stats to the input df 
-        df.ix[df[file_col] == filepath, var_name] = df_stats[var_name]
-        stat_cols = list(df_stats.columns)
-        df_vals[stat_cols] = df_stats
-        #df_vals[file_col] = df_temp[file_col]
-        
-    else:
-        vals = {var_name: ar[df_temp.row - row_off, df_temp.col - col_off]}
-        df_vals = pd.DataFrame(vals, index=df_temp.index)
-        
+            # Make a df from the array and from an array of stats for each kernel
+            df_vals = pd.DataFrame(vals, columns=val_cols, index=df_file.index)
+            df_stats = pd.DataFrame(calc_row_stats(vals, data_type, var_name, nodata), index=df_file.index)
+            
+            # Add the new values and stats to the input df 
+            df.ix[df[file_col] == filepath, var_name] = df_stats[var_name]
+            stat_cols = list(df_stats.columns)
+            df_vals[stat_cols] = df_stats
+            df_vals[file_col] = df_file[file_col]
+            
+        else:
+            vals = {var_name: ar[df_file.row - row_off, df_file.col - col_off]}
+            df_vals = pd.DataFrame(vals, index=df_file.index)
+            
     return df_vals 
 
 
@@ -219,8 +220,10 @@ def calc_row_stats(ar, data_type, var_name, nodata):
         var = np.var(ar, axis=1)
         std = np.std(ar, axis=1)
         rnge = np.ptp(ar, axis=1)
-        val_stats = {var_name: mean, var_name + '_median': med, 
-                     var_name + '_variance': var, var_name + '_stdv': std,
+        val_stats = {var_name: mean, 
+                     var_name + '_median': med, 
+                     var_name + '_variance': var,
+                     var_name + '_stdv': std,
                      var_name + '_range': rnge
                      }
     
@@ -233,7 +236,7 @@ def calc_row_stats(ar, data_type, var_name, nodata):
         
     return val_stats
 
-def extract_var(year, var_name, by_tsa, data_band, data_type, df_tsa, df_xy, basepath, search_str, path_filter, mosaic_tx, last_file, n_files, nodata=None):
+def extract_var(year, var_name, by_tsa, data_band, data_type, df_tsa, df_xy, basepath, search_str, path_filter, mosaic_tx, last_file, n_files, nodata=None, kernel=False):
     '''
     Return a dataframe of 
     '''
@@ -269,9 +272,10 @@ def extract_var(year, var_name, by_tsa, data_band, data_type, df_tsa, df_xy, bas
     for f in df_tsa[file_col].unique():
         print 'Extracting for array %s of approximately %s from:\n%s\n'\
         % (last_file, n_files, f)
-        # If extract from the dataset depending on how year is stored
         dfs.append(extract_by_rowcol(df_xy, f, file_col, var_col, data_band,
-                                     mosaic_tx, val_cols, data_type, nodata))
+                                     mosaic_tx, val_cols, data_type, nodata,
+                                     kernel
+                                     ))
         last_file += 1
         
     # Comnbine all the pieces for this year
@@ -280,7 +284,7 @@ def extract_var(year, var_name, by_tsa, data_band, data_type, df_tsa, df_xy, bas
     return df_var, last_file - file_count
     
 
-def main(params, out_dir=None, xy_txt=None):          
+def main(params, out_dir=None, xy_txt=None, kernel=False):          
     t0 = time.time()
     # Read params. Make variables from each line of the 1-line variables
     inputs, df_vars = read_params(params)
@@ -358,9 +362,10 @@ def main(params, out_dir=None, xy_txt=None):
             else: 
                 data_band = int(var_row.data_band)
 
-            df_var, this_count = extract_var(year, var_name, by_tsa, data_band, data_type, df_tsa, df_xy, basepath, search_str, path_filter, mosaic_tx, last_file, n_files, nodata)
+            df_var, this_count = extract_var(year, var_name, by_tsa, data_band, data_type, df_tsa, df_xy, basepath, search_str, path_filter, mosaic_tx, last_file, n_files, nodata, kernel)
             df_yr[df_var.columns] = df_var
             last_file += this_count
+            #import pdb; pdb.set_trace()
         
         # Write df_var with all years for this predictor to txt file
         this_bn = '%s_%s_kernelstats.txt' % (xy_txt_bn[:-4], year)
@@ -378,8 +383,10 @@ def main(params, out_dir=None, xy_txt=None):
     out_txt = os.path.join(out_dir, out_bn)
     #df_out = df_xy.drop(['tsa_id', 'row', 'col', 'x', 'y'], axis=1)# May want to keep row/col
     # Remove any rows where anything is null
-    df_out = df_xy.ix[~df_xy.isnull().any(axis=1), out_cols] 
+    null_mask = df_xy.isnull().any(axis=1)
+    df_out = df_xy.ix[~null_mask, out_cols]
     df_out.to_csv(out_txt, sep='\t')
+    df_xy.ix[null_mask, out_cols].to_csv(out_txt.replace('.txt', '_dropped.txt'), sep='\t')
     print 'Dataframe written to:\n', out_txt       
     print 'Total extraction time: %.1f minutes' % ((time.time() - t0)/60)
 

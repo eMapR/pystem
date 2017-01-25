@@ -47,8 +47,8 @@ def main(params, pct_train=None, min_oob=0):
     if not 'out_dirname' in locals(): out_dirname = target_col
     stamp = '{0}_{1}_{2}'.format(out_dirname, date_str, time_str)
     out_dir = os.path.join(out_dir, stamp)
-    os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists'''
-    shutil.copy2(params, out_dir) #Copy the params for reference
+    os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists
+    shutil.copy2(params, out_dir) #Copy the params for reference '''
 
     # Read in training samples and check that df_train has exactly the same
     #   columns as variables specified in df_vars    
@@ -77,7 +77,6 @@ def main(params, pct_train=None, min_oob=0):
                                               gsrd_shp, pct_train)
 
     # Train a tree for each support set
-    print 'Training models...'
     t1 = time.time()
     if model_type.lower() == 'classifier':
         print 'Training STEM with classifier algorithm...'
@@ -112,25 +111,26 @@ def main(params, pct_train=None, min_oob=0):
     df_sets, set_txt = stem.write_model(out_dir, df_sets)
     print '%.1f minutes\n' % ((time.time() - t1)/60)#'''
     
-    #stamp = os.path.basename(out_dir)
-    #set_txt = '/vol/v2/stem/{0}/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
-    
-    #predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_bright','delta_green','delta_nbr','delta_wet', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
+    '''stamp = os.path.basename(out_dir)
+    set_txt = '/vol/v2/stem/{0}/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
+    df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
+    df_oob = pd.read_csv(os.path.join(out_dir, '%s_oob.txt' % stamp), sep='\t')
+    predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_bright','delta_green','delta_nbr','delta_wet', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
     
     # Record params in inventory text file
     if 'inventory_txt' in locals():
         t1 = time.time()
         print 'Getting model info...\n'
         df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
-        if 'regressor' in params: 
-            model_type = 'Regressor'
-        else: 
-            model_type = 'Classifier'
         n_sets = len(df_sets)
         if 'sample' in sample_txt:
             n_samples = int(sample_txt.split('_')[1].replace('sample',''))
-        info = [model_type, None, None, None, None, None, None, None, None, n_sets, n_samples, str(support_size), sets_per_cell, max_features]
-        df_inv.ix[stamp] = info
+        inv_columns = df_inv.columns
+        if 'n_sets' in inv_columns: df_inv.ix[stamp, 'n_sets'] = n_sets
+        if 'n_samples' in inv_columns: df_inv.ix[stamp, 'n_samples'] = n_samples
+        if 'support_size' in inv_columns: df_inv.ix[stamp, 'support_size'] = str(support_size)
+        if 'sets_per_cell' in inv_columns: df_inv.ix[stamp, 'sets_per_cell'] = sets_per_cell
+        if 'max_features' in inv_columns: df_inv.ix[stamp, 'max_features'] = max_features
         info_dir = os.path.dirname(inventory_txt)
         existing_models = fnmatch.filter(os.listdir(os.path.dirname(info_dir)), '%s*' % target_col)
         if len(existing_models) > 0:
@@ -143,7 +143,6 @@ def main(params, pct_train=None, min_oob=0):
         else:
             n_tiles = int(n_tiles[0]), int(n_tiles[1])
             
-        #t1 = time.time()
         print 'Calculating OOB score and making OOB score map...'
         ds = gdal.Open(mosaic_path)
         ar = ds.ReadAsArray()
@@ -156,7 +155,6 @@ def main(params, pct_train=None, min_oob=0):
         driver = ds.GetDriver()
         ds = None  
         
-        #import get_oob_map as oob
         ar_oob, ar_cnt, df_sets = stem.oob_map(ysize, xsize, 0, mask, n_tiles, tx,
                                      support_size, df_oob, df_sets, target_col,
                                      predict_cols, out_dir,
@@ -166,8 +164,8 @@ def main(params, pct_train=None, min_oob=0):
         #if 'inventory_txt' in locals() :
         avg_oob = round(np.mean(ar_oob[mask]), 1)
         avg_cnt = int(round(np.mean(ar_cnt[mask]), 0))
-        df_inv.ix[stamp, 'avg_oob'] = avg_oob
-        #df_inv.ix[stamp, 'avg_count'] = avg_cnt
+        if 'avg_oob' in inv_columns: df_inv.ix[stamp, 'avg_oob'] = avg_oob
+        if 'avg_count' in inv_columns: df_inv.ix[stamp, 'avg_count'] = avg_cnt
         if len(df_inv) > 1:
             df_inv.to_csv(inventory_txt, sep='\t')
         else:

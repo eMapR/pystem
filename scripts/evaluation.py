@@ -1,6 +1,4 @@
-'''
 
-'''
 import os
 import gdal
 import ogr
@@ -14,8 +12,9 @@ from gdalconst import *
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, PowerNorm
 from scipy import stats
+from sklearn import metrics
 
 import mosaic_by_tsa as mosaic
 import aggregate_stem as aggr
@@ -182,12 +181,6 @@ def calc_rmspe(x, y):
     return rmspe
 
 
-def calc_rmse(x, y):
-    rmse = np.sqrt(((100 * (x - y)) ** 2).mean())
-    
-    return rmse
-
-
 def calc_agree_coef(x, y, mean_x, mean_y):
     ''' 
     Return the agreement coefficient, the systematic agreement, and
@@ -219,9 +212,17 @@ def calc_agree_coef(x, y, mean_x, mean_y):
     return ac, ac_s, ac_u, ssd, spod
 
 
-def zonal_stats(ar, shp, tx, nodata, stats, unique_mask=False):
+def zonal_stats(ar, shp, tx, nodata, stat_dict, unique_mask=False):
     '''
     Calculate zonal stats within polygons from shp
+    
+    Parameters:
+    ar -- the array to calc stats on
+    zone_shp -- the shapefile with the zones to cal stats within (in this case the hexagons
+    tx -- the geotransform of the raster that ar is from
+    nodata -- nodata value of ar
+    stat_dict -- a dictionary of stat_name: function where function is any valid summarizing function for an array that returns a single value
+    unique_mask -- set to True if all features of shp are unique.
     '''
     ds = ogr.Open(shp)
     lyr = ds.GetLayer()
@@ -231,7 +232,6 @@ def zonal_stats(ar, shp, tx, nodata, stats, unique_mask=False):
     ul_x, x_res, x_rot, ul_y, y_rot, y_res = tx
     zone_mask = feature_to_mask(feat, x_res, y_res) # Mask is always the same for hex
     zonal_stats = []
-    print zone_mask.size
 
     while feat:
         # If each feature is a unique shape and/or size
@@ -248,7 +248,7 @@ def zonal_stats(ar, shp, tx, nodata, stats, unique_mask=False):
         a_zone = ar_sub[m_zone & a_mask]
         
         # Get stats for this zone
-        these_stats = {name: np.apply_along_axis(function, 0, a_zone).ravel()[0] for name, function in stats.iteritems()}
+        these_stats = {name: np.apply_along_axis(function, 0, a_zone).ravel()[0] for name, function in stat_dict.iteritems()}
         fid = feat.GetFID()
         these_stats['fid'] = fid
         zonal_stats.append(these_stats)
@@ -258,8 +258,7 @@ def zonal_stats(ar, shp, tx, nodata, stats, unique_mask=False):
 
     ds.Destroy()
     df = pd.DataFrame(zonal_stats)
-    #import pdb; pdb.set_trace()
-    #df = df.reindex(columns=['fid', 'pred_mean', 'targ_mean', 'mean_dif', 'stdv', 'agree_coef', 'AC_sys', 'AC_unsys', 'ssd', 'spod', 'willmott', 'rmspe'] + ['rmspe_%s' % u for l, u in lims])
+
     return df
 
    
@@ -372,6 +371,14 @@ def zonal_stats(ar, shp, tx, nodata, stats, unique_mask=False):
 def df_to_shp(df, in_shp, out_path, copy_fields=True):
     '''
     Write a new shapefile with features from in_shp and attributes from df
+    
+    Parameters:
+    df -- dataframe containing info to append to the attribute table of the 
+          output shapefile
+    in_shp -- input shapefile
+    out_shp -- path of the output shapefile with extenion ".shp"
+    copy_fields -- If True, all fields from in_shp will be copied to the
+            attribute table of the output shapefile
     '''
     if 'fid' not in [c.lower() for c in df.columns]:
         print 'Warning: no FID column found in dataframe. Using index of'+\
@@ -446,108 +453,9 @@ def scatter_plot(x, y, xlab, ylab, out_dir):
     plt.savefig(os.path.join(out_dir, xlab + '_vs_' + ylab + '.png'))
     
 
-def confusion_matrix(ar_p, ar_t, bins=10, out_txt=None, samples=None):
-    ''' 
-    Return a dataframe of a confusion matrix of binned continuous values
-    '''
-    # Check if bins is an int (could be an iterable of bin ranges). If so,
-    #   calcualte bin ranges.
-    if type(bins) == int:
-        t_range = (ar_t.max() - ar_t.min())
-        bin_sz = t_range/bins
-        bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
+def get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=False):
     
-    if type(samples) == pd.core.frame.DataFrame:
-        p_samples = ar_p[samples.row, samples.col]
-        t_samples = ar_t[samples.row, samples.col]
-    else:
-        p_samples = ar_p
-        t_samples = ar_t
-    
-    
-    # For each bin in the target array, count how many pixels are in each bin
-    #   in the prediction array.
-    cols = {}
-    labels = []
     t0 = time.time()
-    for l, u in bins:
-        print 'Getting counts for truth class from %s to %s' % (l, u)
-        t1 = time.time() 
-        label = '%s_%s' % (l, u)
-        labels.append(label)
-        #t_mask = (ar_t > l) & (ar_t <= u) # Create a mask of bin values from target
-        t_mask = (t_samples > l) & (t_samples <= u) # Create a mask of bin values from target
-        
-        counts = []
-        for l, u in bins:
-            this_p = p_samples[t_mask & (ar_p > l) & (ar_p <= u)]
-            counts.append(len(this_p))
-        
-        #rows.append(counts)
-        cols[label] = counts
-        print 'Time for this class: %.1f seconds\n' % (time.time() - t1)
-        
-    df = pd.DataFrame(cols, columns=labels)
-    df['bin'] = labels
-    df = df.set_index('bin')
-    
-    # Calculate user's and producer's accuracy
-    correct_list = []
-    for l in labels:
-        correct = df.ix[l, l]
-        correct_list.append(correct)
-        df.ix[l, 'user'] = round(100 * float(correct)/df.ix[l].sum(), 1)
-        df.ix['producer', l] = round(100 * float(correct)/df[l].sum(), 1)
-    
-    for l in labels[1:]:
-        correct = df.ix[l, l]
-        correct_list.append(correct)
-        df.ix[l, 'user_no0'] = round(100 * float(correct)/df.ix[l, labels[1]:].sum(), 1)
-        df.ix['producer_no0', l] = round(100 * float(correct)/df.ix[labels[1]:, l].sum(), 1)
-    
-    # Calc overall accuracy and kappa coefficient
-    total_pxl = df.ix[labels, labels].values.sum()
-    acc_o = sum(correct_list)/total_pxl # observed accuracy
-    marg_t = df.ix[labels, labels].sum(axis=0)
-    marg_p = df.ix[labels, labels].sum(axis=1)
-    acc_e = ((marg_t * marg_p)/total_pxl).sum()/total_pxl
-    kappa = (acc_o - acc_e)/(1 - acc_e) # Expected accuracy
-    df.ix['producer', 'user'] = round(100 * acc_o, 1) 
-    df.ix['kappa', 'kappa'] = kappa
-    
-    total_pxl_0 = df.ix[labels[1:], labels[1:]].values.sum()
-    acc_o_0 = sum(correct_list[1:])/total_pxl_0
-    marg_t_0 = df.ix[labels[1:], labels[1:]].sum(axis=0)
-    marg_p_0 = df.ix[labels[1:], labels[1:]].sum(axis=1)
-    acc_e_0 = ((marg_t_0 * marg_p_0)/total_pxl_0).sum()/total_pxl_0
-    kappa_0 = (acc_o_0 - acc_e_0)/(1 - acc_e_0)
-    df.ix['producer_no0', 'user_no0'] = round(100 * acc_o_0, 1) 
-    df.ix['kappa_no0', 'kappa_no0'] = kappa_0
-    #df.ix['producer_no0', 'user_no0'] = round(100 * sum(correct_list[1:])/df.ix[labels[1:], labels[1:]].values.sum(), 1)
-    
-    if out_txt:
-        df.to_csv(out_txt, sep='\t')
-        print 'Dataframe written to: ', out_txt 
-    
-    print 'Total time: %.1f minutes' % ((time.time() - t0)/60)
-    return df
-    
-
-def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None, bins=10, out_txt=None, match=False, target_col=None):
-    ''' 
-    Return a dataframe of a confusion matrix of binned continuous values
-    '''
-    # Check if bins is an int (could be an iterable of bin ranges). If so,
-    #   calcualte bin ranges.
-    t0 = time.time()
-    if type(bins) == int:
-        t_range = (ar_t.max() - ar_t.min())
-        bin_sz = t_range/bins
-        bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
-    
-    #p_samples = ar_p[samples.row, samples.col]
-    print 'Getting average prediction sample vals for 3 x 3 kernel... '
-    t1 = time.time()
     row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
     col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
     kernel_rows = [row + d + 1 for row in samples.row for d in row_dirs] #+1 because buffering at edges
@@ -559,6 +467,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     t_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
     #del ar_buf
     if not match:
+        print 'Getting average prediction sample vals for 3 x 3 kernel... '
         test_stats = pd.DataFrame(calc_row_stats(p_kernel, 'continuous', 'value', p_nodata))
         sample_mask = ~test_stats.value.isnull().values # Where value is not null
         p_samples = test_stats.value.values # Get values as np array
@@ -572,10 +481,10 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         t_samples = test_stats.value.values[sample_mask].astype(np.int32)
             #t_samples = t_samples[sample_mask].astype(np.int32)
         #import pdb; pdb.set_trace()
-        print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)#'''
+        print 'Time to get samples: %.1f seconds\n' % (time.time() - t0)#'''
         
     else:
-        print 'Matching...'
+        print 'Finding best match for each sample in a 3 x 3 kernel...'
         
         #p_kernel = p_kernel.astype(float)
         #p_kernel[p_kernel == p_nodata] = np.nan #Insulate nodata pixels
@@ -591,11 +500,70 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         #dif = np.abs(p_kernel - t_kernel)
         # Subtract sampled prediction value from each pixel in the kernel
         dif = np.abs(np.apply_along_axis(lambda x: x - p_samples, axis=0, arr=t_kernel))
-        dif[np.isnan(dif)] = dif.max() + 1#can't keep as nan because some rows could be all nan so nanargmin() with raise an error
+        dif[np.isnan(dif)] = np.nanmax(dif) + 1#can't keep as nan because some rows could be all nan so nanargmin() will raise an error
         pxl_ind = np.argmin(dif, axis=1)
         #p_samples = p_kernel[sample_mask, pxl_ind]
         t_samples = t_kernel[xrange(n_samples), pxl_ind]
         #import pdb; pdb.set_trace()
+        sample_mask = ~np.isnan(t_samples)
+        t_samples = t_samples[sample_mask]
+        p_samples = p_samples[sample_mask]
+        
+        print 'Time to get samples: %.1f seconds\n' % (time.time() - t0)
+    
+    return p_samples, t_samples
+
+
+def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None, bins=10, out_txt=None, match=False, target_col=None):
+    ''' 
+    Return a dataframe of a confusion matrix of binned continuous values
+    '''
+    # Check if bins is an int (could be an iterable of bin ranges). If so,
+    #   calcualte bin ranges.
+    t0 = time.time()
+    if type(bins) == int:
+        t_range = (ar_t.max() - ar_t.min())
+        bin_sz = t_range/bins
+        bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
+    
+    print 'Getting average prediction sample vals for 3 x 3 kernel... '
+    t1 = time.time()
+    row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
+    col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
+    kernel_rows = [row + d + 1 for row in samples.row for d in row_dirs] #+1 because buffering at edges
+    kernel_cols = [col + d + 1 for col in samples.col for d in col_dirs]
+    ar_buf = np.full([dim + 2 for dim in ar_p.shape], p_nodata, dtype=np.int32)
+    ar_buf[1:-1, 1:-1] = ar_p
+    p_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
+    ar_buf[1:-1, 1:-1] = ar_t
+    t_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
+
+    if not match:
+        test_stats = pd.DataFrame(calc_row_stats(p_kernel, 'continuous', 'value', p_nodata))
+        sample_mask = ~test_stats.value.isnull().values # Where value is not null
+        p_samples = test_stats.value.values # Get values as np array
+        p_samples = p_samples[sample_mask].astype(np.int32)
+        del test_stats, p_kernel
+        
+        test_stats = pd.DataFrame(calc_row_stats(t_kernel, 'continuous', 'value', t_nodata))
+        t_samples = test_stats.value.values[sample_mask].astype(np.int32)
+        print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)#'''
+        
+    else:
+        print 'Matching...'
+        p_samples = ar_p[samples.row, samples.col]
+        sample_mask = p_samples != p_nodata
+        p_samples = p_samples[sample_mask]
+        n_samples = p_samples.size
+        t_kernel = t_kernel[sample_mask,:].reshape(n_samples, len(row_dirs)).astype(float)
+        t_kernel[t_kernel == t_nodata] = np.nan
+        
+        # Subtract sampled prediction value from each pixel in the kernel
+        dif = np.abs(np.apply_along_axis(lambda x: x - p_samples, axis=0, arr=t_kernel))
+        dif[np.isnan(dif)] = dif.max() + 1#can't keep as nan because some rows could be all nan so nanargmin() with raise an error
+        pxl_ind = np.argmin(dif, axis=1)
+        #p_samples = p_kernel[sample_mask, pxl_ind]
+        t_samples = t_kernel[xrange(n_samples), pxl_ind]
         print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)
     #t_samples = ar_t[samples.row, samples.col]#[sample_mask]
     
@@ -610,13 +578,6 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     labels = []
     sample_counts = []
     total_counts  = []
-    #upper = np.array([u for l, u in bins]) + 1
-    #p_class = np.clip(np.digitize(p_samples, upper, right=False), 1, 10)
-    #t_class = np.clip(np.digitize(t_samples, upper, right=False), 1, 10)
-    #import pdb; pdb.set_trace()
-    #cm= metrics.confusion_matrix(t_class, p_class)
-    #kappa = metrics.cohen_kappa_score(t_class, p_class)
-    #labels = ['%s_%s' % (l, u) for l, u in bins]
     for l, u in bins:
         print 'Getting counts for truth class from %s to %s' % (l, u)
         t2 = time.time() 
@@ -662,13 +623,6 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         df.ix[l, 'user'] = round(100 * float(correct)/df.ix[l, labels].sum(), 1)
         df.ix['producer', l] = round(100 * float(correct)/df.ix[labels, l].sum(), 1)
     
-    correct_list_0 = []
-    for l in labels[1:]:
-        correct = df.ix[l, l]
-        correct_list_0.append(correct)
-        df.ix[l, 'user_no0'] = round(100 * float(correct)/df.ix[l, labels[1:]].sum(), 1)
-        df.ix['producer_no0', l] = round(100 * float(correct)/df.ix[labels[1:], l].sum(), 1)
-    
     # Calc overall accuracy and kappa coefficient
     total_pxl = df.ix[labels, labels].values.sum()
     acc_o = sum(correct_list)/total_pxl # observed accuracy
@@ -678,16 +632,6 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     kappa = (acc_o - acc_e)/(1 - acc_e) # Expected accuracy
     df.ix['producer', 'user'] = round(100 * acc_o, 1) 
     df.ix['producer', 'kappa'] = round(kappa, 3)
-    
-    total_pxl_0 = df.ix[labels[1:], labels[1:]].values.sum()
-    acc_o_0 = sum(correct_list_0)/total_pxl_0
-    marg_t_0 = df.ix[labels[1:], labels[1:]].sum(axis=0)
-    marg_p_0 = df.ix[labels[1:], labels[1:]].sum(axis=1)
-    acc_e_0 = ((marg_t_0 * marg_p_0)/total_pxl_0).sum()/total_pxl_0
-    kappa_0 = (acc_o_0 - acc_e_0)/(1 - acc_e_0)
-    df.ix['producer_no0', 'user_no0'] = round(100 * acc_o_0, 1) 
-    df.ix['producer_no0', 'kappa_no0'] = round(kappa_0, 3)
-    #df.ix['producer_no0', 'user_no0'] = round(100 * sum(correct_list[1:])/df.ix[labels[1:], labels[1:]].values.sum(), 1)
     
     disagree_q, total_q = quantity_disagreement(df, labels)
     disagree_a, total_a = allocation_disagreement(df, labels)
@@ -728,6 +672,29 @@ def allocation_disagreement(df, class_labels):
     
     return disagree_a, total_a
         
+
+def histogram_2d(t_samples, p_samples, out_png, bins=50, title=None, cmap=matplotlib.cm.gray, hexplot=False, vmax=None):
+    print 'Plotting 2D histogram...'
+    t0 = time.time()
+    clip = False
+    if vmax:
+        clip = True
+    if hexplot:
+        if type(bins) != int: 
+            print 'WARNING: bins given is not an integer, setting to default 100 equally sized bins...'
+            bins=50
+        plt.hexbin(t_samples, p_samples, gridsize=bins, norm=LogNorm(vmax=vmax, clip=clip), cmap='gray_r')
+    else:
+        plt.hist2d(t_samples, p_samples, bins=bins, norm=LogNorm(vmax=vmax, clip=clip))
+    plt.xlabel(os.path.basename('Reference class'))
+    plt.ylabel(os.path.basename('Predicted class'))
+    plt.colorbar()
+    plt.tick_params(right=False)
+    plt.tick_params(axis='y', which='minor', color='none')
+    #fig_path = os.path.join(pxl_scale_dir, title)
+    plt.savefig(out_png, dpi=300)
+    plt.clf()
+    print '%.1f seconds\n' % (time.time() - t0)
 
 
 def plot_agreement(df, out_png, sys_color='cyan', unsys_color='magenta', class_labels=None, xlabel='Land Cover Class', ylabel='Agreement Coefficient'):
@@ -813,7 +780,7 @@ def plot_bin_agreement(ar_pred, ar_targ, nodata_t, out_dir):
     
     out_png = os.path.join(out_dir, 'agreement_per_bin_no0.png')
     plot_agreement(df, out_png, class_labels=df.bin.tolist(), xlabel='Bin Range', ylabel='Prediction Value')
-
+        
 
 def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc, search_dir, search_str, eval_scales, out_dir, clip_shp=None):
     
@@ -959,42 +926,48 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
 
 
 ''' ########## Testing ############# '''
-"""src_shp = '/vol/v2/stem/extent_shp/hex50000.shp'
+
+"""models = ['c_guttatus_res2yr_20161204_0049',
+'h_rustica_res10yr_20161204_0022',
+'p_melanocephalus_res10yr_20161205_1103',
+'s_neglecta_res2yr_20161207_1630',
+'z_leucophrys_res10yr_20161203_2302']
+
+src_shp = '/vol/v2/stem/extent_shp/hex50000.shp'
 tch_shp = '/vol/v2/stem/extent_shp/CAORWA.shp'
 #zone_shp = '/vol/v2/stem/extent_shp/hex50000_CAORWA.shp'
 zone_shp = '/vol/v2/stem/extent_shp/hex20000_CAORWA.shp'
 eval_scales = [10000, 20000, 50000]
 #get_overlapping_polys(src_shp, tch_shp, zone_shp)'''
-out_shp = '/vol/v2/stem/imperv/models/imperv_20161012_0958/evaluation_vote/imperv_stdvavg20000.shp'
-path = '/vol/v2/stem/imperv/models/imperv_20161012_0958/imperv_20161012_0958_stdv.bsq'
-ds = gdal.Open(path)
-ar = ds.ReadAsArray()
-tx = ds.GetGeoTransform()
-stats = {'mean': np.mean, 'count': np.count_nonzero}
-df = zonal_stats(ar, zone_shp, tx, 255, stats)
-#df['area_change'] = df['mean'] * df['count']
-#import pdb; pdb.set_trace()
-df_to_shp(df, zone_shp, out_shp)
-ar = None
-ds = None#"""
+for m in models:
+    out_shp = '/vol/v2/stem/ebird/models/{0}/occurrence_{0}_avg20000.shp'.format(m)
+    path = '/vol/v2/stem/ebird/models/{0}/final_{0}_yr2011.tif'.format(m)
+    ds = gdal.Open(path)
+    ar = ds.ReadAsArray()
+    tx = ds.GetGeoTransform()
+    stat_dict = {'mean': np.mean, 'stdv': np.std}
+    df = zonal_stats(ar, zone_shp, tx, 255, stat_dict)
+    df_to_shp(df, zone_shp, out_shp)
+    ar = None
+    ds = None#"""
 
 #p_path = '/vol/v2/stem/canopy/outputs/canopy_20160311_2209/canopy_20160311_2209_final_vote.bsq'
 #t_path = '/vol/v2/stem/canopy/truth_map/canopy2001_CAORWA.bsq'
 
-"""p_path = '/vol/v2/stem/imperv/models/imperv_20160925_1241/imperv_20160925_1241_vote.bsq'
+'''p_path = '/vol/v2/stem/imperv/models/imperv_20161012_0958/imperv_20161012_0958_vote.bsq'
 t_path = '/vol/v2/stem/imperv/truth_map/imperv2001_CAORWA.bsq'
 
 lc_path = '/vol/v1/general_files/datasets/spatial_data/states_spatial_data/calorewash_buffer_spatial_data/calorewash_buffer_nlcd2001_landcover_shift.tif'
 mask_path = '/vol/v2/stem/canopy/truth_map/nonforest_mask_2001.tif' #Change to nlcd mask
-nodata_p = -9999
+nodata_p = 255
 nodata_t = 255
 nodata_lc = 255
-out_dir = '/vol/v2/stem/imperv/models/imperv_20160925_1241/evaluation_vote'
+out_dir = '/vol/v2/stem/imperv/models/imperv_20161012_0958/evaluation_vote/'
 search_dir = '/vol/v2/stem/extent_shp'
-search_str = 'hex%s_CAORWA.shp'
+search_str = 'hex%s_CAORWA.shp' #'''
 #main(p_path, t_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc, search_dir, search_str, eval_scales, out_dir, clip_shp=None)
-'''txt = '/vol/v2/stem/canopy/outputs/imperv_20160605_1754/evaluation/agreement_per_decile.txt'
-df = pd.read_csv(txt, sep='\t')'''
+#txt = '/vol/v2/stem/canopy/outputs/imperv_20160605_1754/evaluation/agreement_per_decile.txt'
+#df = pd.read_csv(txt, sep='\t')
 
 #mask_path = '/vol/v2/stem/imperv/truth_map/nlcd2001_urbanmask.bsq'
 '''mask_path = '/vol/v2/stem/imperv/models/imperv_20160704_1504/imperv_20160725_2002_vote.bsq'
@@ -1004,28 +977,47 @@ ar_m = ds_m.ReadAsArray().astype(np.int32)
 ar_m = ar_m == 0
 #ar_m = None#'''
 
-ds_p = gdal.Open(p_path)
+'''p_path = '/vol/v2/stem/canopy/models/canopy_20161018_2254/canopy_20161018_2254_vote.bsq'
+t_path = '/vol/v2/stem/canopy/truth_map/canopy2001_CAORWA.bsq'
+nodata_p = 255
+nodata_t = 255
+out_dir = '/vol/v2/stem/canopy/models/canopy_20161018_2254/evaluation_vote' #'''
+
+"""ds_p = gdal.Open(p_path)
 ar_p = ds_p.ReadAsArray()
-#ar_p[ar_m] = 0
-#ar_p = ar_p[10000:20000, 5000:15000]
-tx = ds_p.GetGeoTransform()
-#ar_p[nonforest] = 0
-#aggr.mask_array(ar_p, ar_m, tx, tx_m, mask_val=0)
+ds_p = None
 
 ds_t = gdal.Open(t_path)
 ar_t = ds_t.ReadAsArray()
-#ar_t[nonforest] = 0
-#aggr.mask_array(ar_c, forest_mask, tx, tx_m, mask_val=0)
-#ar_c = ar_c[10000:20000, 5000:15000]
+ds_t = None
 mask = (ar_p == -9999) | (ar_t == 255)#'''
 bins = [(-1,0), (0,10), (10,20), (20,30), (30,40), (40,50), (50, 60), (60, 70), (70, 80), (80,90), (90,100)]
+
+sample_txt = '/vol/v2/stem/imperv/samples/imperv_sample1454542_20161007_0843/imperv_sample1454542_20161007_0843_test.txt'
+#sample_txt = '/vol/v2/stem/canopy/samples/canopy_sample1454542_20161017_1919/canopy_sample1454542_20161017_1919_test.txt'
+df = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
+p_samples, t_samples = get_samples(ar_p, ar_t, df, nodata_p, nodata_t, match=False)
+#t_mask = (t_samples > 0) & (p_samples > 0)
+#t_samples = t_samples[t_mask]
+#p_samples = p_samples[t_mask]
+out_png = os.path.join(out_dir, 'imperv_20161012_0958_2dhistogram_average_hex_gray.png')
+#out_png = os.path.join(out_dir, 'canopy_20161018_2254_2dhistogram_bestmatch_hex_gray.png')
+#import pdb; pdb.set_trace()
+import seaborn as sns
+sns.set_context(context='paper', font_scale=1.4)
+histogram_2d(t_samples, p_samples, out_png, bins=50, hexplot=True, vmax=4000)
+print out_png
+ar_p = None
+ar_t = None
+p_samples = None
+t_samples = None#"""
 
 #out_txt = '/vol/v2/stem/imperv/models/imperv_20160725_2002/evaluation_vote/confusion_allpixels.txt'
 
 '''ar_p_data = ar_p[~mask]
 ar_t_data = ar_t[~mask]#'''
 
-smpl_txt = '/vol/v2/stem/imperv/samples/imperv_sample283622_20160917_1846/imperv_sample_test283622_20160917_1846.txt'
+"""smpl_txt = '/vol/v2/stem/imperv/samples/imperv_sample283622_20160917_1846/imperv_sample_test283622_20160917_1846.txt'
 samples = pd.read_csv(smpl_txt, sep='\t', index_col='obs_id')
 '''ar_t_data = samples.imperv.values
 ar_p_data = ar_p[samples.row, samples.col]#'''

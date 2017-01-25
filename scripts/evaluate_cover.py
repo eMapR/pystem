@@ -613,7 +613,6 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         bin_sz = t_range/bins
         bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
     
-    #p_samples = ar_p[samples.row, samples.col]
     print 'Getting average prediction sample vals for 3 x 3 kernel... '
     t1 = time.time()
     row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
@@ -625,7 +624,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     p_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
     ar_buf[1:-1, 1:-1] = ar_t
     t_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
-    #del ar_buf
+
     if not match:
         test_stats = pd.DataFrame(calc_row_stats(p_kernel, 'continuous', 'value', p_nodata))
         sample_mask = ~test_stats.value.isnull().values # Where value is not null
@@ -633,21 +632,12 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         p_samples = p_samples[sample_mask].astype(np.int32)
         del test_stats, p_kernel
         
-        #if target_col:
-        #    t_samples = samples.ix[sample_mask, target_col]
-        #else:
         test_stats = pd.DataFrame(calc_row_stats(t_kernel, 'continuous', 'value', t_nodata))
         t_samples = test_stats.value.values[sample_mask].astype(np.int32)
-            #t_samples = t_samples[sample_mask].astype(np.int32)
-        #import pdb; pdb.set_trace()
         print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)#'''
         
     else:
         print 'Matching...'
-        
-        #p_kernel = p_kernel.astype(float)
-        #p_kernel[p_kernel == p_nodata] = np.nan #Insulate nodata pixels
-        #sample_mask = ~np.isnan(p_kernel).all(axis=1)
         p_samples = ar_p[samples.row, samples.col]
         sample_mask = p_samples != p_nodata
         p_samples = p_samples[sample_mask]
@@ -655,8 +645,6 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         t_kernel = t_kernel[sample_mask,:].reshape(n_samples, len(row_dirs)).astype(float)
         t_kernel[t_kernel == t_nodata] = np.nan
         
-        # Find the pixel in each kernel with the lowest difference
-        #dif = np.abs(p_kernel - t_kernel)
         # Subtract sampled prediction value from each pixel in the kernel
         dif = np.abs(np.apply_along_axis(lambda x: x - p_samples, axis=0, arr=t_kernel))
         dif[np.isnan(dif)] = dif.max() + 1#can't keep as nan because some rows could be all nan so nanargmin() with raise an error
@@ -677,13 +665,6 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     labels = []
     sample_counts = []
     total_counts  = []
-    #upper = np.array([u for l, u in bins]) + 1
-    #p_class = np.clip(np.digitize(p_samples, upper, right=False), 1, 10)
-    #t_class = np.clip(np.digitize(t_samples, upper, right=False), 1, 10)
-    #import pdb; pdb.set_trace()
-    #cm= metrics.confusion_matrix(t_class, p_class)
-    #kappa = metrics.cohen_kappa_score(t_class, p_class)
-    #labels = ['%s_%s' % (l, u) for l, u in bins]
     for l, u in bins:
         print 'Getting counts for truth class from %s to %s' % (l, u)
         t2 = time.time() 
@@ -729,12 +710,12 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         df.ix[l, 'user'] = round(100 * float(correct)/df.ix[l, labels].sum(), 1)
         df.ix['producer', l] = round(100 * float(correct)/df.ix[labels, l].sum(), 1)
     
-    correct_list_0 = []
+    '''correct_list_0 = []
     for l in labels[1:]:
         correct = df.ix[l, l]
         correct_list_0.append(correct)
         df.ix[l, 'user_no0'] = round(100 * float(correct)/df.ix[l, labels[1:]].sum(), 1)
-        df.ix['producer_no0', l] = round(100 * float(correct)/df.ix[labels[1:], l].sum(), 1)
+        df.ix['producer_no0', l] = round(100 * float(correct)/df.ix[labels[1:], l].sum(), 1)'''
     
     # Calc overall accuracy and kappa coefficient
     total_pxl = df.ix[labels, labels].values.sum()
@@ -746,7 +727,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     df.ix['producer', 'user'] = round(100 * acc_o, 1) 
     df.ix['producer', 'kappa'] = round(kappa, 3)
     
-    total_pxl_0 = df.ix[labels[1:], labels[1:]].values.sum()
+    '''total_pxl_0 = df.ix[labels[1:], labels[1:]].values.sum()
     acc_o_0 = sum(correct_list_0)/total_pxl_0
     marg_t_0 = df.ix[labels[1:], labels[1:]].sum(axis=0)
     marg_p_0 = df.ix[labels[1:], labels[1:]].sum(axis=1)
@@ -754,7 +735,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     kappa_0 = (acc_o_0 - acc_e_0)/(1 - acc_e_0)
     df.ix['producer_no0', 'user_no0'] = round(100 * acc_o_0, 1) 
     df.ix['producer_no0', 'kappa_no0'] = round(kappa_0, 3)
-    #df.ix['producer_no0', 'user_no0'] = round(100 * sum(correct_list[1:])/df.ix[labels[1:], labels[1:]].values.sum(), 1)
+    #df.ix['producer_no0', 'user_no0'] = round(100 * sum(correct_list[1:])/df.ix[labels[1:], labels[1:]].values.sum(), 1)'''
     
     disagree_q, total_q = quantity_disagreement(df, labels)
     disagree_a, total_a = allocation_disagreement(df, labels)
@@ -1077,7 +1058,7 @@ for m in models:
 #p_path = '/vol/v2/stem/canopy/outputs/canopy_20160311_2209/canopy_20160311_2209_final_vote.bsq'
 #t_path = '/vol/v2/stem/canopy/truth_map/canopy2001_CAORWA.bsq'
 
-p_path = '/vol/v2/stem/imperv/models/imperv_20161012_0958/imperv_20161012_0958_vote.bsq'
+'''p_path = '/vol/v2/stem/imperv/models/imperv_20161012_0958/imperv_20161012_0958_vote.bsq'
 t_path = '/vol/v2/stem/imperv/truth_map/imperv2001_CAORWA.bsq'
 
 lc_path = '/vol/v1/general_files/datasets/spatial_data/states_spatial_data/calorewash_buffer_spatial_data/calorewash_buffer_nlcd2001_landcover_shift.tif'
@@ -1106,7 +1087,7 @@ nodata_p = 255
 nodata_t = 255
 out_dir = '/vol/v2/stem/canopy/models/canopy_20161018_2254/evaluation_vote' #'''
 
-ds_p = gdal.Open(p_path)
+"""ds_p = gdal.Open(p_path)
 ar_p = ds_p.ReadAsArray()
 ds_p = None
 

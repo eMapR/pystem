@@ -1,9 +1,11 @@
-raster_path; /vol/v2/stem/canopy/truth_map/canopy2011_CAORWA.tif
-col_name; imperv
+raster_path; /vol/v2/stem/landcover/truth_map/nlcd2001_CAORWA_3x3equal.tif
+col_name; landcover
 data_band; 1
 nodata; 255
-n_samples; 200000
-bins; -1:0, 0:10, 10:20, 20:30, 30:40, 40:50, 50:60, 60:70, 70:80, 80:90, 90:100
-zero_inflation; 10
-pct_train; 1
-out_txt; /vol/v2/stem/canopy/samples/canopy2011_sample.txt
+n_samples; 100000
+bins; 10:11, 11:12, 20:21, 21:22, 22:23, 23:24, 30:31, 40:41, 41:42, 42:43, 51:52, 70:71, 80:81, 81:82, 89:90, 94:95
+pct_train; 0.8
+out_txt; /vol/v2/stem/landcover/samples/nlcd2001_sample.txt
+
+Optional parameters
+data_type; classified

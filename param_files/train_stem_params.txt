@@ -12,16 +12,19 @@ brightness	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_b_t.bsq	/vol/v1/scenes	1
 wetness	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_w_t.bsq	/vol/v1/scenes	1
 nbr	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_nbr_t.bsq	/vol/v1/scenes	1
 time_since	18	*/history_m1o0/LT_v2.*_nbr_*_paramset01*_ts_v.bsq	/vol/v1/scenes	1
+mse	continuous	-1	*_mse_split.bsq	/vol/v1/scenes	1
 
-sample_txt; /vol/v2/stem/imperv/samples/imperv_sample141806_20160702_1714/imperv_sample141806_20160702_1714_predictors.txt
-target_col; imperv
+sample_txt; /vol/v2/stem/landcover/samples/nlcd2001_sample80000_20170124_1445/nlcd2001_sample80000_20170124_1445_predictors.txt
+target_col; landcover
 mosaic_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
 tsa_txt; /vol/v2/stem/scripts/tsa_orwaca.txt
-cell_size; 200000, 150000
-support_size; 400000, 300000
-sets_per_cell; 18
-min_obs; 25
-out_dir; /vol/v2/stem/imperv/models/
-max_features; auto
+cell_size; 135000, 90000
+support_size; 200000, 150000
+sets_per_cell; 24
 gsrd_shp; /vol/v2/stem/extent_shp/orwaca.shp
+min_obs; 200
+model_type; classifier
+out_dir; /vol/v2/stem/landcover/models
 
+Optional parameters
+inventory_txt; /vol/v2/stem/landcover/models/model_info.txt

@@ -117,11 +117,11 @@ def main(params, inventory_txt=None, constant_vars=None):
     
     # Loop through each set and generate predictions
     t0 = time.time()
-    for c, (set_id, row) in enumerate(df_sets.ix[286:].iterrows()):
+    for c, (set_id, row) in enumerate(df_sets.iterrows()):
         t1 = time.time()
         with open(row.dt_file, 'rb') as f: 
             dt_model = pickle.load(f)
-        print '\nPredicting for set %s of %s' % (c + 286, total_sets)
+        print '\nPredicting for set %s of %s' % (c + 1, total_sets)
         ar_coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
         ar_predict = stem.predict_set(set_id, df_var, mosaic_ds, ar_coords, 
                                  mosaic_tx, xsize, ysize, dt_model, nodata,
@@ -163,7 +163,7 @@ def main(params, inventory_txt=None, constant_vars=None):
         vote_dir = os.path.join(model_dir, 'evaluation_vote')
         mean_dir = os.path.join(model_dir, 'evaluation_mean')
         
-        print '\nGetting confusion matrix for vote...'
+        print '\nComputing confusion matrix for vote...'
         out_txt = os.path.join(vote_dir, 'confusion.txt')
         print confusion_params
         df_v = confusion.main(confusion_params, ar_vote, out_txt, match=True)
@@ -173,26 +173,24 @@ def main(params, inventory_txt=None, constant_vars=None):
         except Exception as e:
             print e
         
-        print '\nGetting confusion matrix for mean...'
+        '''print '\nGetting confusion matrix for mean...'
         out_txt = os.path.join(mean_dir, 'confusion.txt')
         df_m = confusion.main(confusion_params, ar_mean, out_txt, match=True)
         try:
             out_txt = os.path.join(mean_dir, 'confusion_avg_kernel.txt')
             df_m_off = confusion.main(confusion_params, ar_mean, out_txt)
         except Exception as e:
-            print e
+            print e'''
         
         vote_acc = df_v.ix['user','producer']
         vote_kap = df_v.ix['user', 'kappa']
-        mean_acc = df_m.ix['user','producer']
-        mean_kap = df_m.ix['user', 'kappa']
+        #mean_acc = df_m.ix['user','producer']
+        #mean_kap = df_m.ix['user', 'kappa']
 
         if 'inventory_txt':
             df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
-            cols = ['vote_accuracy', 'vote_kappa', 'vote_mask', 
-            'mean_accuracy', 'mean_kappa', 'vote_mask']
-            df_inv.ix[file_stamp, cols] = vote_acc, vote_kap, False, \
-            mean_acc, mean_kap, False
+            cols = ['vote_accuracy', 'vote_kappa']#, 'vote_mask', 'mean_accuracy', 'mean_kappa', 'vote_mask']
+            df_inv.ix[file_stamp, cols] = vote_acc, vote_kap#, False, mean_acc, mean_kap, False
             df_inv.to_csv(inventory_txt, sep='\t')
         else:
             print '\n"inventory_txt" was not specified.' +\
@@ -201,8 +199,8 @@ def main(params, inventory_txt=None, constant_vars=None):
         print ''
         print 'Vote accuracy .............. ', vote_acc
         print 'Vote kappa ................. ', vote_kap
-        print 'Mean accuracy .............. ', mean_acc
-        print 'Mean kappa ................. ', mean_kap
+        #print 'Mean accuracy .............. ', mean_acc
+        #print 'Mean kappa ................. ', mean_kap
         
     else:
         print '\n"confusion_params" was not specified.' +\
