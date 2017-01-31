@@ -808,13 +808,10 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, nodata_mask, 
     '''
     t0 = time.time()
     predictors = []
-    #rows, cols = tsa_ar.shape
-    #df_predict = np.empty((rows * cols, len(df_var)), dtype=np.int16)
     for ind, var in enumerate(df_var.index):
         this_tsa_ar = np.copy(tsa_ar)
         data_band, search_str, basepath, by_tsa, path_filter = df_var.ix[var]
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
-        #import pdb; pdb.set_trace()
         
         if by_tsa:
             files = [find_file(basepath, search_str, tsa, path_filter) for tsa in tsa_strs]
@@ -829,7 +826,6 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, nodata_mask, 
             except:
                 import pdb; pdb.set_trace()
         ar_var[nodata_mask] = out_nodata
-        #predictors[var] = ar_var.ravel()
         predictors.append(ar_var.ravel())
 
     #df_predict = pd.DataFrame(predictors)
@@ -896,11 +892,12 @@ def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, d
 
     # Get an array of predictors where each column is a flattened 2D array of a
     #   single predictor variable
-    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, tsa_mask, nodata, constant_vars)
+    temp_nodata = -9999
+    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, tsa_mask, temp_nodata, constant_vars)
     del tsa_ar #Release resources from the tsa array
     
     t0 = time.time()
-    nodata_mask = np.all(~(ar_predict==nodata), axis=1)
+    nodata_mask = ~ np.any(ar_predict==temp_nodata, axis=1)
     ''' I've tried to predict in parallel here but it doesn't speed things up'''
     '''p = Pool(20)
     in_pieces = np.array_split(ar_predict[nodata_mask], 20)
