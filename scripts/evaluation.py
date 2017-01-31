@@ -526,7 +526,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         bin_sz = t_range/bins
         bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
     
-    print 'Getting average prediction sample vals for 3 x 3 kernel... '
+    '''print 'Getting average prediction sample vals for 3 x 3 kernel... '
     t1 = time.time()
     row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
     col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
@@ -547,7 +547,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         
         test_stats = pd.DataFrame(calc_row_stats(t_kernel, 'continuous', 'value', t_nodata))
         t_samples = test_stats.value.values[sample_mask].astype(np.int32)
-        print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)#'''
+        print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)
         
     else:
         print 'Matching...'
@@ -565,11 +565,13 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         #p_samples = p_kernel[sample_mask, pxl_ind]
         t_samples = t_kernel[xrange(n_samples), pxl_ind]
         print 'Time to get samples: %.1f seconds\n' % (time.time() - t1)
-    #t_samples = ar_t[samples.row, samples.col]#[sample_mask]
+    #t_samples = ar_t[samples.row, samples.col]#[sample_mask]'''
+    
+    p_sample, t_samples = get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=match)
     
     ar_p = ar_p[~mask]
     ar_t = ar_t[~mask]
-    n_pixels = ar_p.size
+    n_pixels = ar_t.size
     
     # For each bin in the target array, count how many pixels are in each bin
     #   in the prediction array.
@@ -585,7 +587,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         labels.append(label)
         #t_mask = (ar_t > l) & (ar_t <= u) # Create a mask of bin values from target
         t_mask = (t_samples <= u) & (t_samples > l)# Create a mask of bin values from target
-        p_mask = (p_samples <= u) & (p_samples > l)
+        #p_mask = (p_samples <= u) & (p_samples > l)
         
         counts = []
         for this_l, this_u in bins:
@@ -593,9 +595,9 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
             this_p = p_samples[t_mask & this_p_mask]
             counts.append(len(this_p))
         
-        total_count = len(ar_p[(ar_p <= u) & (ar_p > l)])#total pixels in bin
-        n_samples = len(p_samples[p_mask])#total samples in this bin
-        counts = counts #+ [n_samples, total_count] 
+        total_count = len(ar_t[(ar_t <= u) & (ar_t > l)])#total pixels in bin in reference map
+        n_samples = len(t_samples[t_mask])#total samples in this bin in reference samples
+        #counts = counts #+ [n_samples, total_count] 
         
         #rows.append(counts)
         cols[label] = counts
