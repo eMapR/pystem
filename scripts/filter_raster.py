@@ -208,13 +208,11 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
         b_inds = df_buf.ix[i, ['ul_r', 'lr_r', 'ul_c', 'lr_c']]
         t_inds = df_tiles.ix[i, ['ul_r', 'lr_r', 'ul_c', 'lr_c']]
         d_ulr, d_lrr, d_ulc, d_lrc = t_inds - b_inds
-        #import pdb; pdb.set_trace()
         
         tile = buffered_tile[d_ulr : d_lrr, d_ulc : d_lrc]
         tile[np.isnan(tile)] = nodata
         tile = tile.astype(array_dtype)
         t_ulr, t_lrr, t_ulc, t_lrc = t_inds
-        #import pdb; pdb.set_trace()
         filtered[t_ulr : t_lrr, t_ulc : t_lrc] = tile
     print '%.1f minutes\n' % ((time.time() - t1)/60)   
     

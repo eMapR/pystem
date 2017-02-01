@@ -230,8 +230,8 @@ def replace_val_with_array(tsa_ar, data_ar, tsa_id, offset):
     data_view = data_ar[data_row_u : data_row_d, data_col_l : data_col_r]
     tsa_view = tsa_ar[tsa_row_u : tsa_row_d, tsa_col_l : tsa_col_r]
     tsa_mask = tsa_view == tsa_id
-    #print tsa_id
-    #import pdb; pdb.set_trace()    
+        
+
     np.copyto(tsa_view, data_view, where=tsa_mask)
          
 
@@ -298,7 +298,7 @@ def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords,  data_band, files=None, **
     # Save the new mosaic as a raster if out_path is specified
     if 'out_path' in locals():
         tx = ul_x, mosaic_tx[1], 0.0, ul_y, 0.0, mosaic_tx[5]
-        array_to_raster(tsa_ar, tx, prj, driver, out_path, GDT_Int32) 
+        array_to_raster(tsa_ar, tx, prj, driver, out_path, GDT_Int16) 
         ''' fix dtype so that it can be a float if the array is'''
     del df_ars, df
     
