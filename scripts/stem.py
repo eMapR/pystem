@@ -1217,7 +1217,8 @@ def weighted_mean(ar, b, c=5, a=1):
 
 def pct_vote(ar, ar_vote, ar_count):
     
-    ar_eq = ar == ar_vote
+    shape = ar.shape
+    ar_eq = ar == ar_vote.repeat(shape[2]).reshape(shape)
     ar_sum = ar_eq.sum(axis=2)
     ar_pct = np.round(ar_sum/ar_count.astype(np.float16) * 100).astype(np.uint8)
     
@@ -1733,32 +1734,32 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
             except Exception as e:
                 print e
                 continue#'''
-            print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
+        print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
             
-            ar_tile = np.dstack(pred_bands)
-            nd_impr = np.dstack(importance_bands)
-            del pred_bands, importance_bands#, ar_import
-            t3 = time.time()
-            #this_mean = np.nanmean(ar_tile, axis=2)
-            this_vote = mode(ar_tile, axis=2)
-            #this_stdv = np.nanstd(ar_tile, axis=2) * 100 #Multiply b/c converting to int
-            this_coun = np.sum(~np.isnan(ar_tile), axis=2)
-            this_impr = mode(nd_impr, axis=2)
-            this_pcvt = pct_vote(ar_tile, this_vote, this_coun)
-            #this_wtmn_10 = weighted_mean(ar_tile, this_vote, c=10)
-            #this_wtmn_20 = weighted_mean(ar_tile, this_vote, c=20)
+        ar_tile = np.dstack(pred_bands)
+        nd_impr = np.dstack(importance_bands)
+        del pred_bands, importance_bands#, ar_import
+        t3 = time.time()
+        #this_mean = np.nanmean(ar_tile, axis=2)
+        this_vote = mode(ar_tile, axis=2)
+        #this_stdv = np.nanstd(ar_tile, axis=2) * 100 #Multiply b/c converting to int
+        this_coun = np.sum(~np.isnan(ar_tile), axis=2)
+        this_impr = mode(nd_impr, axis=2)
+        this_pcvt = pct_vote(ar_tile, this_vote, this_coun)
+        #this_wtmn_10 = weighted_mean(ar_tile, this_vote, c=10)
+        #this_wtmn_20 = weighted_mean(ar_tile, this_vote, c=20)
+        
+        nans = np.isnan(this_vote)
+        #this_mean[nans] = nodata
+        #this_stdv[nans] = nodata
+        this_impr[nans] = nodata
+        this_vote[nans] = nodata
+        #this_coun[nans] = nodata
+        this_pcvt[nans] = nodata
+        #this_wtmn_10[nans] = nodata
+        #this_wtmn_20[nans] = nodata
             
-            nans = np.isnan(this_vote)
-            #this_mean[nans] = nodata
-            #this_stdv[nans] = nodata
-            this_impr[nans] = nodata
-            this_vote[nans] = nodata
-            #this_coun[nans] = nodata
-            this_pcvt[nans] = nodata
-            #this_wtmn_10[nans] = nodata
-            #this_wtmn_20[nans] = nodata
-            
-            print 'Aggregating: %.1f minutes' % ((time.time() - t3)/60)
+        print 'Aggregating: %.1f minutes' % ((time.time() - t3)/60)
         print 'Total aggregation time: %.1f minutes\n' % ((time.time() - t1)/60)    
         
         # Fill in the tile in the final arrays
