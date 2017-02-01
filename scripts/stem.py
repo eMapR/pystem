@@ -19,9 +19,10 @@ import glob
 import shutil
 import random
 import warnings
-#from itertools import count as itertoolscount
-#from random import sample as randomsample
-#from string import ascii_lowercase
+import traceback
+from itertools import count as itertoolscount
+from random import sample as randomsample
+from string import ascii_lowercase
 from osgeo import gdal, ogr
 from gdalconst import *
 from sklearn import tree, metrics
@@ -40,7 +41,7 @@ warnings.filterwarnings('ignore')
 # Turn off the annoying setting value on a copy warning
 pd.options.mode.chained_assignment = None
 
-"""_data_name_cands = (
+_data_name_cands = (
     '_data_' + ''.join(randomsample(ascii_lowercase, 10))
     for _ in itertoolscount())
 
@@ -74,7 +75,7 @@ class ForkedData(object):
 
     def __del__(self):
         if os.getpid() == self.master_pid:
-            del globals()[self.name]"""
+            del globals()[self.name]
 
 
 def read_params(txt):
@@ -520,9 +521,9 @@ def get_gsrd(extent_ras, cell_size, support_size, n_sets, df_train, min_obs, tar
     print 'Writing dataframes to disk...'
     t1 = time.time()
     train_txt = os.path.join(out_txt.replace('.txt', '_train.txt'))
-    #test_txt = train_txt.replace('train', 'test')
-    df_train.to_csv(train_txt, sep='\t', index=False)
-    df_oob.to_csv(out_txt.replace('.txt', '_oob.txt'), sep='\t')
+    out_cols = [c for c in df_train.columns if c not in predict_cols]
+    df_train[out_cols].to_csv(train_txt, sep='\t', index=False)
+    df_oob[out_cols].to_csv(out_txt.replace('.txt', '_oob.txt'), sep='\t')
     if len(df_test) > 0:
         df_test.to_csv(out_txt.replace('.txt', '_test.txt'), sep='\t')
     print '%.1f minutes\n' % ((time.time() - t1)/60)
@@ -801,7 +802,7 @@ def get_predict_array(args):
     return args[0], ar.ravel()
     
     
-def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, nodata_mask, out_nodata, constant_vars=None):
+def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, nodata_mask, out_nodata, constant_vars=None):
     '''
     Return an array of flattened predictor arrays where each predictor is a 
     separate column
@@ -815,14 +816,14 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, nodata_mask, 
         
         if by_tsa:
             files = [find_file(basepath, search_str, tsa, path_filter) for tsa in tsa_strs]
-            ar_var = mosaic.get_mosaic(mosaic_tx, tsa_strs, this_tsa_ar, ar_coords, data_band, files)
+            ar_var = mosaic.get_mosaic(mosaic_tx, tsa_strs, this_tsa_ar, coords, data_band, files)
             
         else:
             #this_file = find_file(basepath, search_str, path_filter=path_filter)
-            #tx_, ar_var, roff_, coff_ = mosaic.get_array(this_file, data_band, ar_coords)
+            #tx_, ar_var, roff_, coff_ = mosaic.get_array(this_file, data_band, coords)
             try:
                 this_file = find_file(basepath, search_str, path_filter=path_filter)
-                tx_, ar_var, roff_, coff_ = mosaic.get_array(this_file, data_band, ar_coords)
+                tx_, ar_var, roff_, coff_ = mosaic.get_array(this_file, data_band, coords)
             except:
                 import pdb; pdb.set_trace()
         ar_var[nodata_mask] = out_nodata
@@ -837,50 +838,17 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, nodata_mask, 
     ar = np.vstack(predictors).T
     del predictors
     
-    print 'Time to get predictor arrays: %.1f minutes' % ((time.time() - t0 )/60)       
+    #print 'Time to get predictor arrays: %.1f minutes' % ((time.time() - t0 )/60)       
     return ar
     
-    
-"""def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, dt, nodata, save_stuff=None):
-    '''
-    Return a predicted array for set, set_ind
-    '''
-    # Get an array of tsa_ids within the bounds of ar_coords
-    tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, ar_coords, mosaic_tx,
-                                            xsize, ysize, nodata=nodata)
-    tsa_ar[tsa_ar==0] = nodata
-    # Get the ids of TSAs this kernel covers
-    tsa_ids = np.unique(tsa_ar)
-    tsa_strs = ['0' + str(tsa) for tsa in tsa_ids if tsa!=nodata]
-    array_shape = tsa_ar.shape
 
-    # Get an array of predictors where each column is a flattened 2D array of a
-    #   single predictor variable
-    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords)
-    del tsa_ar #Release resources from the tsa array
-    
-    t0 = time.time()
-    nodata_mask = np.any(~(ar_predict==nodata), axis=1)
-    ''' I've tried to predict in parallel here but it doesn't speed things up'''
-    #p = Pool(40)
-    #in_pieces = np.array_split(ar_predict[nodata_mask], 40)
-    #out_pieces = p.map(par_predict, [(dt, chunk) for chunk in in_pieces])
-    #import pdb; pdb.set_trace()
-    #predictions = np.concatenate(out_pieces)
-    predictions = dt.predict(ar_predict[nodata_mask]).astype(np.int16)
-    ar_prediction = np.full(ar_predict.shape[0], nodata, dtype=np.int16)
-    ar_prediction[nodata_mask] = predictions
-    
-    print 'Finished predicting...', time.time() - t0
-    
-    return ar_prediction.reshape(array_shape)"""
 
-def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, constant_vars=None):
+def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, constant_vars=None):
     '''
     Return a predicted array for set with id==set_id
     '''
-    # Get an array of tsa_ids within the bounds of ar_coords
-    tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, ar_coords, mosaic_tx,
+    # Get an array of tsa_ids within the bounds of coords
+    tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords, mosaic_tx,
                                             xsize, ysize, nodata=nodata)
     tsa_mask = tsa_ar == 0
     tsa_ar[tsa_mask] = nodata
@@ -893,7 +861,7 @@ def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, d
     # Get an array of predictors where each column is a flattened 2D array of a
     #   single predictor variable
     temp_nodata = -9999
-    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, ar_coords, tsa_mask, temp_nodata, constant_vars)
+    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, tsa_mask, temp_nodata, constant_vars)
     del tsa_ar #Release resources from the tsa array
     
     t0 = time.time()
@@ -909,24 +877,48 @@ def predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, d
     ar_prediction = np.full(ar_predict.shape[0], nodata, dtype=dtype)
     ar_prediction[nodata_mask] = predictions
     
-    print 'Time for predicting: %.1f minutes' % ((time.time() - t0)/60)
+    #print 'Time for predicting: %.1f minutes' % ((time.time() - t0)/60)
     
     return ar_prediction.reshape(array_shape)
     
+
+def par_predict(args):
+    '''Helper function to parallelize simultaneously predicting with multiple decision trees'''
     
-def predict_set_in_pieces(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, n_pieces=10):
+    t0 = time.time()
+    set_count, total_sets, set_id, df_var, forked_ds, coords, mosaic_tx, xsize, ysize, dt_file, nodata, dtype, constant_vars, predict_dir = args
+    print '\nPredicting for set %s of %s' % (set_count + 1, total_sets)
+    mosaic_ds = forked_ds.value
+    with open(dt_file, 'rb') as f: 
+        dt_model = pickle.load(f)
+    try:
+        ar = predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt_model, nodata, dtype, constant_vars)
+        out_path = os.path.join('/vol/v2/stem/landcover/models/delete', 'prediction_%s.bsq' % set_id)
+        prj = mosaic_ds.GetProjection()
+        driver = gdal.GetDriverByName('ENVI')
+        out_tx = coords.ul_x, mosaic_tx[1], mosaic_tx[2], coords.ul_y, mosaic_tx[4], mosaic_tx[5]
+        mosaic.array_to_raster(ar, out_tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
+        
+    except:
+        print 'set_count: ', set_count, 'set_id: ', set_id
+        sys.exit(traceback.print_exception(*sys.exc_info()))
+    
+    print 'Total time for set %s of %s: %.1f minutes' % (set_count + 1, total_sets, (time.time() - t0)/60)
+
+
+def predict_set_in_pieces(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, n_pieces=10):
     '''
     Return a predicted array for set with id, set_ind
     '''
-    # Get an array of tsa_ids within the bounds of ar_coords
-    tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, ar_coords, mosaic_tx,
+    # Get an array of tsa_ids within the bounds of coords
+    tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords, mosaic_tx,
                                             xsize, ysize, nodata=nodata)
     array_shape = tsa_ar.shape
     tsa_pieces = np.array_split(tsa_ar, n_pieces)
     del tsa_ar 
     
     y_res = mosaic_tx[5]
-    ul_x, ul_y, lr_x, lr_y = ar_coords
+    ul_x, ul_y, lr_x, lr_y = coords
     piece_coords = []
     this_uly = ul_y
     predict_pieces = []
@@ -936,7 +928,7 @@ def predict_set_in_pieces(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize
         tsa_mask = tsa_ar == 0
         tsa_ar[tsa_mask] = nodata
         
-        #recalc ar_coords
+        #recalc coords
         '''this_ysize, this_xsize = tsa_ar.shape
         this_uly = uly_coords[i]
         this_lry = this_uly + (this_ysize * y_res)
@@ -980,15 +972,6 @@ def predict_set_in_pieces(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize
     print 'Time for predicting: %.1f minutes' % ((time.time() - t0)/60)
     
     return ar_prediction.reshape(array_shape)
-
-
-def par_predict(args):
-    '''Helper function to parallelize predicting for a decision tree'''
-    dt, ar = args
-    try:
-        return dt.predict(ar)
-    except:
-        sys.exit(traceback.print_exception(*sys.exc_info()))
         
 
 def get_tiles(n_tiles, xsize, ysize, tx=None):
@@ -1984,10 +1967,10 @@ def predict_set_from_disk(df_sets, set_id, params):
     prj = mosaic_ds.GetProjection()
     driver = mosaic_ds.GetDriver()
     
-    ar_coords = this_set[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
+    coords = this_set[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
     mosaic_dir = '/vol/v2/stem/canopy/canopy_20160212_2016/var_mosaics'
     saving_stuff = set_id, mosaic_dir, prj, driver
-    ar_predict = predict_set(set_id, df_var, mosaic_ds, ar_coords, mosaic_tx, xsize, ysize, dt_model, saving_stuff)
+    ar_predict = predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt_model, saving_stuff)
     return ar_predict
     
     '''out_dir = '/vol/v2/stem/scripts/testing'

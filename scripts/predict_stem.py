@@ -13,6 +13,7 @@ import shutil
 import pandas as pd
 import cPickle as pickle
 from osgeo import gdal
+from multiprocessing import Pool
 import numpy as np
 
 import stem
@@ -115,24 +116,40 @@ def main(params, inventory_txt=None, constant_vars=None):
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     total_sets = len(df_sets)
     
-    # Loop through each set and generate predictions
     t0 = time.time()
-    for c, (set_id, row) in enumerate(df_sets.iterrows()):
-        t1 = time.time()
-        with open(row.dt_file, 'rb') as f: 
-            dt_model = pickle.load(f)
-        print '\nPredicting for set %s of %s' % (c + 1, total_sets)
-        ar_coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-        ar_predict = stem.predict_set(set_id, df_var, mosaic_ds, ar_coords, 
-                                 mosaic_tx, xsize, ysize, dt_model, nodata,
-                                 np.int16, constant_vars)        
-        tx = ar_coords.ul_x, x_res, x_rot, ar_coords.ul_y, y_rot, y_res
-        out_path = os.path.join(predict_dir, 'prediction_%s.bsq' % set_id)
-        array_to_raster(ar_predict, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
-        print 'Total time for this set: %.1f minutes' % ((time.time() - t1)/60)
-
-    #mosaic_ds = None                  
-    print '\nTotal time for predicting: %.1f hours\n' % ((time.time() - t0)/3600)#'''
+    if 'n_jobs' in inputs:
+        # Predict in parallel
+        n_jobs = int(n_jobs)
+        args = []
+        for c, (set_id, row) in enumerate(df_sets.iterrows()):
+            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
+            forked_ds = stem.ForkedData(mosaic_ds)
+            args.append([c, total_sets, set_id, df_var, forked_ds, coords, 
+                         mosaic_tx, xsize, ysize, row.dt_file, nodata, np.int16, 
+                         constant_vars, predict_dir])
+            #stem.par_predict(args)
+        p = Pool(n_jobs)
+        p.map(stem.par_predict, args, 1)
+            
+    
+    else:
+        # Loop through each set and generate predictions
+        for c, (set_id, row) in enumerate(df_sets.iterrows()):
+            t1 = time.time()
+            with open(row.dt_file, 'rb') as f: 
+                dt_model = pickle.load(f)
+            print '\nPredicting for set %s of %s' % (c + 1, total_sets)
+            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
+            ar_predict = stem.predict_set(set_id, df_var, mosaic_ds, coords, 
+                                     mosaic_tx, xsize, ysize, dt_model, nodata,
+                                     np.int16, constant_vars)        
+            tx = coords.ul_x, x_res, x_rot, coords.ul_y, y_rot, y_res
+            out_path = os.path.join(predict_dir, 'prediction_%s.bsq' % set_id)
+            array_to_raster(ar_predict, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
+            print 'Total time for this set: %.1f minutes' % ((time.time() - t1)/60)
+    
+        #mosaic_ds = None                  
+        print '\nTotal time for predicting: %.1f hours\n' % ((time.time() - t0)/3600)#'''
     
     #Aggregate predictions by tile and stitch them back together
     if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
