@@ -31,7 +31,7 @@ def read_params(txt):
         print 'Problem reading parameter file:\n', txt
         return None
 
-    # Set the dictionary key to whatever is left of the ";" and the val
+    # Set the dictionary key to whatever is left of the ";" and the value
     #   to whatever is to the right. Strip whitespace too.
     for var in input_vars:
         if len(var) == 2:
@@ -43,7 +43,7 @@ def read_params(txt):
     return d
     
 
-def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, match=False):
+def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, match=False, file_stamp=None):
     #p_path, t_path, bins, sample_txt, p_nodata, t_nodata, out_dir, inventory_txt=None
     
     # Read params and make variables from text
@@ -66,7 +66,7 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
     # If p_path was specified, this call of the function is coming from outside
     #   predict_stem.py. Otherwise, ar_p should be given.
     if 'p_path' in locals():
-        print 'Reading in the prediction path:%s\n' % p_path
+        print 'Reading in the prediction raster:%s\n' % p_path
         ds_p = gdal.Open(p_path)
         ar_p = ds_p.ReadAsArray()
     ds_t = gdal.Open(t_path)
@@ -90,11 +90,21 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
     ar_t = None
     mask = None
     
-    if inventory_txt:
+    accuracy = df.ix['producer','user']
+    kappa = df.ix['producer', 'kappa']
+    if inventory_txt and file_stamp:
         df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
-        if 'vote' in os.path.basename(out_dir):
-            df_inv.ix[s]
-            ''' get stamp and save accuracy in inventory'''
+        if file_stamp in df_inv.index and 'vote' in os.path.basename(out_dir):
+            cols = ['vote_accuracy', 'vote_kappa']
+            df_inv.ix[file_stamp, cols] = accuracy, kappa
+            df_inv.to_csv(inventory_txt, sep='\t')
+            print 'Vote scores written to inventory_txt: ', inventory_txt
+            
+        if file_stamp in df_inv.index and 'mean' in os.path.basename(out_dir):
+            cols = ['mean_accuracy', 'mean_kappa']
+            df_inv.ix[file_stamp, cols] = accuracy, kappa
+            df_inv.to_csv(inventory_txt, sep='\t')
+            
     
     return df
 
