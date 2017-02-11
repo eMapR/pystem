@@ -173,6 +173,11 @@ def get_zone_inds(ar_size, zone_size, tx, feat):
     
     return a_inds, m_inds
 
+def calc_rmse(x, y):
+    rmse = np.sqrt((((x - y)) ** 2).mean())
+    
+    return rmse
+    
 
 def calc_rmspe(x, y):
     ''' Return root mean square percentage error of y with respect to x'''
@@ -453,9 +458,20 @@ def scatter_plot(x, y, xlab, ylab, out_dir):
     plt.savefig(os.path.join(out_dir, xlab + '_vs_' + ylab + '.png'))
     
 
-def get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=False):
+def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match=False):
     
     t0 = time.time()
+    
+    # If samples weren't provided (i.e., wall-to-wall eval), samples are every
+    #   non-nodata pixel
+    #if not samples:
+    if type(samples) != pd.core.frame.DataFrame:
+        ar_rows, ar_cols = np.indices(ar_p.shape)
+        mask = (ar_p != p_nodata) & (ar_t != t_nodata)
+        samples = pd.DataFrame({'row': ar_rows[mask], 'col': ar_cols[mask]})
+        del ar_rows, ar_cols, mask
+    
+    # Get the row and col indices of the kernel surrounding all samples
     row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
     col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
     kernel_rows = [row + d + 1 for row in samples.row for d in row_dirs] #+1 because buffering at edges
@@ -465,7 +481,8 @@ def get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=False):
     p_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
     ar_buf[1:-1, 1:-1] = ar_t
     t_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
-    #del ar_buf
+    del ar_buf
+    
     if not match:
         print 'Getting average prediction sample vals for 3 x 3 kernel... '
         test_stats = pd.DataFrame(calc_row_stats(p_kernel, 'continuous', 'value', p_nodata))
@@ -474,21 +491,12 @@ def get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=False):
         p_samples = p_samples[sample_mask].astype(np.int32)
         del test_stats, p_kernel
         
-        #if target_col:
-        #    t_samples = samples.ix[sample_mask, target_col]
-        #else:
         test_stats = pd.DataFrame(calc_row_stats(t_kernel, 'continuous', 'value', t_nodata))
         t_samples = test_stats.value.values[sample_mask].astype(np.int32)
-            #t_samples = t_samples[sample_mask].astype(np.int32)
-        #import pdb; pdb.set_trace()
         print 'Time to get samples: %.1f seconds\n' % (time.time() - t0)#'''
         
     else:
         print 'Finding best match for each sample in a 3 x 3 kernel...'
-        
-        #p_kernel = p_kernel.astype(float)
-        #p_kernel[p_kernel == p_nodata] = np.nan #Insulate nodata pixels
-        #sample_mask = ~np.isnan(p_kernel).all(axis=1)
         p_samples = ar_p[samples.row, samples.col]
         sample_mask = p_samples != p_nodata
         p_samples = p_samples[sample_mask]
@@ -497,14 +505,11 @@ def get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=False):
         t_kernel[t_kernel == t_nodata] = np.nan
         
         # Find the pixel in each kernel with the lowest difference
-        #dif = np.abs(p_kernel - t_kernel)
         # Subtract sampled prediction value from each pixel in the kernel
         dif = np.abs(np.apply_along_axis(lambda x: x - p_samples, axis=0, arr=t_kernel))
         dif[np.isnan(dif)] = np.nanmax(dif) + 1#can't keep as nan because some rows could be all nan so nanargmin() will raise an error
         pxl_ind = np.argmin(dif, axis=1)
-        #p_samples = p_kernel[sample_mask, pxl_ind]
-        t_samples = t_kernel[xrange(n_samples), pxl_ind]
-        #import pdb; pdb.set_trace()
+        t_samples = t_kernel[xrange(n_samples), pxl_ind] #Rather than xrange, maybe use :
         sample_mask = ~np.isnan(t_samples)
         t_samples = t_samples[sample_mask]
         p_samples = p_samples[sample_mask]
@@ -526,7 +531,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         bin_sz = t_range/bins
         bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
     
-    t_samples, p_samples = get_samples(ar_p, ar_t, samples, p_nodata, t_nodata, match=match)
+    t_samples, p_samples = get_samples(ar_p, ar_t, p_nodata, t_nodata, samples, match=match)
 
     ar_p = ar_p[~mask]
     ar_t = ar_t[~mask]
@@ -544,9 +549,8 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         t2 = time.time() 
         label = '%s_%s' % (l, u)
         labels.append(label)
-        #t_mask = (ar_t > l) & (ar_t <= u) # Create a mask of bin values from target
         t_mask = (t_samples <= u) & (t_samples > l)# Create a mask of bin values from target
-        #p_mask = (p_samples <= u) & (p_samples > l)
+        p_mask = (p_samples <= u) & (p_samples > l)
         
         counts = []
         for this_l, this_u in bins:
@@ -555,8 +559,8 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
 
             counts.append(len(this_p))
         
-        total_count = len(ar_t[(ar_t <= u) & (ar_t > l)])#total pixels in bin in reference map
-        n_samples = len(t_samples[t_mask])#total samples in this bin in reference samples
+        total_count = len(ar_p[(ar_p <= u) & (ar_p > l)])#total pixels in bin in predicted map
+        n_samples = len(p_samples[p_mask])#total samples in this bin in predicted samples
         #counts = counts #+ [n_samples, total_count] 
         
         #rows.append(counts)
@@ -565,36 +569,38 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         sample_counts.append(n_samples)
         
         print 'Time for this class: %.1f seconds\n' % (time.time() - t2)
-    
+        
     df = pd.DataFrame(cols)#, columns=labels + ['n_samples', 'total'])
-    df['total'] = total_counts
+    df['total_pxl'] = total_counts
     df['n_samples'] = sample_counts#'''
     
     df['bin'] = labels
     df = df.set_index('bin')
 
     # Calculate proportional accuracy
-    df['pct_area'] = df.total/float(n_pixels)
+    df['pct_area'] = df.total_pxl/float(n_pixels)
     df.ix[labels, labels] = df.ix[labels, labels].div(df.n_samples, axis=0).mul(df.pct_area, axis=0)
+    df['total'] = df.ix[labels, labels].sum(axis=1)
+    df.ix['total'] = df.ix[labels, labels].sum(axis=0)
     
     # Calculate user's and producer's accuracy
     for l in labels:
         correct = df.ix[l,l]
-        df.ix[l, 'producer'] = round(100 * float(correct)/df.ix[l, labels].sum(), 1)
-        df.ix['user', l] = round(100 * float(correct)/df.ix[labels, l].sum(), 1)
+        df.ix[l, 'user'] = round(100 * float(correct)/df.ix[l, labels].sum(), 1)
+        df.ix['producer', l] = round(100 * float(correct)/df.ix[labels, l].sum(), 1)
     
     # Calc overall accuracy and kappa coefficient
     total_pxl = df.ix[labels, labels].values.sum()
     accuracy = sum(np.diag(df.ix[labels, labels]))/total_pxl
     kappa = kappa_coeff(df, labels, accuracy)
-    df.ix['user', 'producer'] = round(100 * accuracy, 1) 
-    df.ix['user', 'kappa'] = round(kappa, 3)
+    df.ix['producer', 'user'] = round(100 * accuracy, 1) 
+    df.ix['producer', 'kappa'] = round(kappa, 3)
     disagree_q, total_q = quantity_disagreement(df, labels)
     disagree_a, total_a = allocation_disagreement(df, labels)
     df.ix[labels, 'quanitity'] = disagree_q
-    df.ix['user', 'quanitity'] = total_q
+    df.ix['producer', 'quanitity'] = total_q
     df.ix[labels, 'allocation'] = disagree_a
-    df.ix['user', 'allocation'] = total_a
+    df.ix['producer', 'allocation'] = total_a
     
     if out_txt:
         df.to_csv(out_txt, sep='\t')
@@ -644,7 +650,7 @@ def histogram_2d(t_samples, p_samples, out_png, bins=50, title=None, cmap=matplo
         if type(bins) != int: 
             print 'WARNING: bins given is not an integer, setting to default 100 equally sized bins...'
             bins=50
-        plt.hexbin(t_samples, p_samples, gridsize=bins, norm=LogNorm(vmax=vmax, clip=clip), cmap='gray_r')
+        plt.hexbin(t_samples, p_samples, gridsize=bins, norm=LogNorm(vmax=vmax, clip=clip), cmap=cmap)
     else:
         plt.hist2d(t_samples, p_samples, bins=bins, norm=LogNorm(vmax=vmax, clip=clip))
     plt.xlabel(os.path.basename('Reference class'))
