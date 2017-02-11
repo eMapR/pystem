@@ -39,7 +39,7 @@ def main(params, inventory_txt=None, constant_vars=None):
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])    
     df_var.data_band = [int(b) for b in df_var.data_band]#sometimes read as float
-    print constant_vars
+
     try:
         n_tiles = [int(i) for i in n_tiles.split(',')]
         support_size = [int(i) for i in support_size.split(',')]
@@ -123,18 +123,18 @@ def main(params, inventory_txt=None, constant_vars=None):
         args = []
         for c, (set_id, row) in enumerate(df_sets.iterrows()):
             coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
+            if c < 10: print c, coords.values/30
             forked_ds = stem.ForkedData(mosaic_ds)
             args.append([c, total_sets, set_id, df_var, forked_ds, coords, 
                          mosaic_tx, xsize, ysize, row.dt_file, nodata, np.int16, 
                          constant_vars, predict_dir])
-            #stem.par_predict(args)
         p = Pool(n_jobs)
         p.map(stem.par_predict, args, 1)
             
     
     else:
         # Loop through each set and generate predictions
-        for c, (set_id, row) in enumerate(df_sets.iterrows()):
+        for c, (set_id, row) in enumerate(df_sets.ix[2083:].iterrows()):
             t1 = time.time()
             with open(row.dt_file, 'rb') as f: 
                 dt_model = pickle.load(f)
@@ -199,12 +199,12 @@ def main(params, inventory_txt=None, constant_vars=None):
         except Exception as e:
             print e'''
         
-        vote_acc = df_v.ix['user','producer']
-        vote_kap = df_v.ix['user', 'kappa']
+        vote_acc = df_v.ix['producer', 'user']
+        vote_kap = df_v.ix['producer', 'kappa']
         #mean_acc = df_m.ix['user','producer']
         #mean_kap = df_m.ix['user', 'kappa']
 
-        if 'inventory_txt':
+        if 'inventory_txt' in inputs:
             df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
             cols = ['vote_accuracy', 'vote_kappa']#, 'vote_mask', 'mean_accuracy', 'mean_kappa', 'vote_mask']
             df_inv.ix[file_stamp, cols] = vote_acc, vote_kap#, False, mean_acc, mean_kap, False
