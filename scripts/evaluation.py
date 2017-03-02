@@ -16,8 +16,8 @@ from matplotlib.colors import LogNorm, PowerNorm
 from scipy import stats
 from sklearn import metrics
 
+import stem
 import mosaic_by_tsa as mosaic
-import aggregate_stem as aggr
 from extract_xy_by_tsa import calc_row_stats
 
 #gdal.UseExceptions()
@@ -166,7 +166,7 @@ def get_zone_inds(ar_size, zone_size, tx, feat):
     y_sign = y_res/abs(y_res)
     f_ulx = min([x0/x_sign for x0 in [x1, x2]])/x_sign
     f_uly = min([y0/y_sign for y0 in [y1, y2]])/y_sign
-    offset = aggr.calc_offset((ar_ulx, ar_uly), (f_ulx, f_uly), tx)
+    offset = stem.calc_offset((ar_ulx, ar_uly), (f_ulx, f_uly), tx)
 
     # Get the inds for the overlapping portions of each array
     a_inds, m_inds = mosaic.get_offset_array_indices(ar_size, zone_size, offset)
@@ -572,28 +572,59 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         
     df = pd.DataFrame(cols)#, columns=labels + ['n_samples', 'total'])
     df['total_pxl'] = total_counts
-    df['n_samples'] = sample_counts#'''
+    #df['n_samples'] = sample_counts#'''
     
     df['bin'] = labels
     df = df.set_index('bin')
 
     # Calculate proportional accuracy
     df['pct_area'] = df.total_pxl/float(n_pixels)
-    df.ix[labels, labels] = df.ix[labels, labels].div(df.n_samples, axis=0).mul(df.pct_area, axis=0)
     df['total'] = df.ix[labels, labels].sum(axis=1)
     df.ix['total'] = df.ix[labels, labels].sum(axis=0)
+    df_adj = df.ix[labels, labels].div(df.total, axis=0).mul(df.pct_area, axis=0)
     
     # Calculate user's and producer's accuracy
     for l in labels:
-        correct = df.ix[l,l]
-        df.ix[l, 'user'] = round(100 * float(correct)/df.ix[l, labels].sum(), 1)
-        df.ix['producer', l] = round(100 * float(correct)/df.ix[labels, l].sum(), 1)
+        correct = df_adj.ix[l,l]
+        df.ix[l, 'user'] = correct / df_adj.ix[l, labels].sum()
+        df.ix['producer', l] = correct / df_adj.ix[labels, l].sum()
     
-    # Calc overall accuracy and kappa coefficient
-    total_pxl = df.ix[labels, labels].values.sum()
-    accuracy = sum(np.diag(df.ix[labels, labels]))/total_pxl
+    # Calculate confidence intervals for user's and producer's
+    df['u_ci'] = df.ix[labels].apply(
+    lambda x: confidence_interval(x[labels], 
+                                  x['total'], 
+                                  x['pct_area'], 
+                                  x['user']
+                                  ),
+                                     axis=1).round(3) * 100
+    df.ix['p_ci'] = df[labels].apply(
+    lambda x: confidence_interval(x[labels], 
+                                  df.ix[labels, 'total'],
+                                  df.ix[labels, 'pct_area'], 
+                                  x['producer']
+                                  ),
+                                     axis=0).round(3) * 100
+    df['user'] = df['user'].round(3) * 100 # Round for readibility
+    df.ix['producer'] = df.ix['producer'].round(3) * 100
+    
+    # Calc overall accuracy and cnfidence interval
+    total_pxl = df_adj.values.sum()
+    correct = np.diag(df_adj)
+    accuracy = correct.sum()
+    df.ix['producer', 'acc_ci'] = confidence_interval(np.diag(df.ix[labels, labels]), 
+                                                      df.ix[labels, 'total'],
+                                                      df.ix[labels, 'pct_area'],
+                                                      accuracy
+                                                      ) * 100
+    
+    # Recalc totals with area-adjusted estimates
+    df.ix[labels, labels] = df_adj
+    df['total'] = df.ix[labels, labels].sum(axis=1)
+    df.ix['total'] = df.ix[labels, labels].sum(axis=0)
+    
+    # Calc kappa and disagreement
     kappa = kappa_coeff(df, labels, accuracy)
-    df.ix['producer', 'user'] = round(100 * accuracy, 1) 
+    df.ix['producer', 'user'] = round(100 * accuracy, 1)
     df.ix['producer', 'kappa'] = round(kappa, 3)
     disagree_q, total_q = quantity_disagreement(df, labels)
     disagree_a, total_a = allocation_disagreement(df, labels)
@@ -638,6 +669,17 @@ def allocation_disagreement(df, class_labels):
     total_a = sum(disagree_a) / 2
     
     return disagree_a, total_a
+    
+
+def confidence_interval(class_totals, map_totals, pct_areas, class_accuracy, z_score=1.96):
+   
+    # Calc standard error of the area proportion
+    pct_totals = class_totals/map_totals
+    se_p = np.sqrt(np.sum(pct_areas ** 2 * ((pct_totals * (1 - pct_totals) ) / (map_totals - 1))))
+    
+    ci = z_score * se_p * class_accuracy / (pct_totals * pct_areas).sum() 
+    
+    return ci
         
 
 def histogram_2d(t_samples, p_samples, out_png, bins=50, title=None, cmap=matplotlib.cm.gray, hexplot=False, vmax=None):
