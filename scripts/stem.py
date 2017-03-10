@@ -649,7 +649,7 @@ def calc_oob_rate(dt, oob_samples, oob_predictors, model_type='classifier'):
     
     oob_prediction = dt.predict(oob_predictors)
     
-    # If the model is a regressor, calculate the pierson's R squared
+    # If the model is a regressor, calculate the R squared
     if model_type.lower() == 'regressor':
         oob_rate = metrics.r2_score(oob_samples, oob_prediction)
     
@@ -802,7 +802,7 @@ def get_predict_array(args):
     return args[0], ar.ravel()
     
     
-def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, nodata_mask, out_nodata, constant_vars=None):
+def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, nodata_mask, out_nodata, set_id, constant_vars=None):
     '''
     Return an array of flattened predictor arrays where each predictor is a 
     separate column
@@ -810,13 +810,13 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, nodata_mask, out
     t0 = time.time()
     predictors = []
     for ind, var in enumerate(df_var.index):
-        this_tsa_ar = np.copy(tsa_ar)
+        #this_tsa_ar = np.copy(tsa_ar)
         data_band, search_str, basepath, by_tsa, path_filter = df_var.ix[var]
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
         
         if by_tsa:
             files = [find_file(basepath, search_str, tsa, path_filter) for tsa in tsa_strs]
-            ar_var = mosaic.get_mosaic(mosaic_tx, tsa_strs, this_tsa_ar, coords, data_band, files)
+            ar_var = mosaic.get_mosaic(mosaic_tx, tsa_strs, tsa_ar, coords, data_band, set_id, files)
             
         else:
             #this_file = find_file(basepath, search_str, path_filter=path_filter)
@@ -848,11 +848,11 @@ def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, 
     Return a predicted array for set with id==set_id
     '''
     # Get an array of tsa_ids within the bounds of coords
+    
     tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords, mosaic_tx,
                                             xsize, ysize, nodata=nodata)
     tsa_mask = tsa_ar == 0
     tsa_ar[tsa_mask] = nodata
-    
     # Get the ids of TSAs this kernel covers
     tsa_ids = np.unique(tsa_ar)
     tsa_strs = ['0' + str(tsa) for tsa in tsa_ids if tsa!=nodata]
@@ -861,18 +861,11 @@ def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, 
     # Get an array of predictors where each column is a flattened 2D array of a
     #   single predictor variable
     temp_nodata = -9999
-    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, tsa_mask, temp_nodata, constant_vars)
+    ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, tsa_mask, temp_nodata, set_id, constant_vars)
     del tsa_ar #Release resources from the tsa array
     
     t0 = time.time()
     nodata_mask = ~ np.any(ar_predict==temp_nodata, axis=1)
-    ''' I've tried to predict in parallel here but it doesn't speed things up'''
-    '''p = Pool(20)
-    in_pieces = np.array_split(ar_predict[nodata_mask], 20)
-    out_pieces = p.map(par_predict, [(dt, chunk) for chunk in in_pieces])
-    #import pdb; pdb.set_trace()
-    predictions = np.concatenate(out_pieces)'''
-
     predictions = dt.predict(ar_predict[nodata_mask]).astype(dtype)
     ar_prediction = np.full(ar_predict.shape[0], nodata, dtype=dtype)
     ar_prediction[nodata_mask] = predictions
@@ -880,15 +873,70 @@ def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, 
     #print 'Time for predicting: %.1f minutes' % ((time.time() - t0)/60)
     
     return ar_prediction.reshape(array_shape)
-    
 
 def par_predict(args):
+    '''Helper function to parallelize predicting with multiple decision trees'''
+    
+    t0 = time.time()
+    
+    
+    set_count, total_sets, set_id, df_var, tsa_raster, tsa_off, coords, mosaic_tx, xsize, ysize, dt_file, nodata, dtype, constant_vars, predict_dir = args
+    print '\nPredicting for set %s of %s' % (set_count + 1, total_sets)
+    ds_tsa = gdal.Open(tsa_raster)
+    tx_out = ds_tsa.GetGeoTransform()
+    prj = ds_tsa.GetProjection()
+    tsa_ar = ds_tsa.ReadAsArray()
+    tsa_files = ds_tsa.GetFileList()
+    ds_tsa = None
+    
+    with open(dt_file, 'rb') as f: 
+        dt_model = pickle.load(f)
+    try:
+        tsa_mask = tsa_ar == 0
+        tsa_ar[tsa_mask] = nodata
+        
+        # Get the ids of TSAs this kernel covers
+        tsa_ids = np.unique(tsa_ar)
+        tsa_strs = ['0' + str(tsa) for tsa in tsa_ids if tsa != nodata]
+        array_shape = tsa_ar.shape
+    
+        # Get an array of predictors where each column is a flattened 2D array of a
+        #   single predictor variable
+        temp_nodata = -9999
+        ar_predict = get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, tsa_mask, temp_nodata, set_id, constant_vars)
+        del tsa_ar #Release resources from the tsa array
+        
+        t0 = time.time()
+        nodata_mask = ~ np.any(ar_predict==temp_nodata, axis=1)    
+        predictions = dt_model.predict(ar_predict[nodata_mask]).astype(dtype)
+        ar_prediction = np.full(ar_predict.shape[0], nodata, dtype=dtype)
+        ar_prediction[nodata_mask] = predictions
+        
+        # Save the predicted raster
+        driver = gdal.GetDriverByName('ENVI')
+        ar_prediction = ar_prediction.reshape(array_shape)
+        out_path = os.path.join(predict_dir, 'prediction_%s.bsq' % set_id)
+        mosaic.array_to_raster(ar_prediction, tx_out, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
+        
+        # Clean up the tsa raster because we don't need it permanently
+        for f in tsa_files: os.remove(f)
+        
+    except:
+        print 'set_count: ', set_count, 'set_id: ', set_id
+        sys.exit(traceback.print_exception(*sys.exc_info()))
+    
+    print 'Total time for set %s of %s: %.1f minutes' % (set_count + 1, total_sets, (time.time() - t0)/60)
+  
+
+"""def par_predict(args):
     '''Helper function to parallelize simultaneously predicting with multiple decision trees'''
     
     t0 = time.time()
     set_count, total_sets, set_id, df_var, forked_ds, coords, mosaic_tx, xsize, ysize, dt_file, nodata, dtype, constant_vars, predict_dir = args
+
     print '\nPredicting for set %s of %s' % (set_count + 1, total_sets)
     mosaic_ds = forked_ds.value
+
     with open(dt_file, 'rb') as f: 
         dt_model = pickle.load(f)
     try:
@@ -903,7 +951,7 @@ def par_predict(args):
         print 'set_count: ', set_count, 'set_id: ', set_id
         sys.exit(traceback.print_exception(*sys.exc_info()))
     
-    print 'Total time for set %s of %s: %.1f minutes' % (set_count + 1, total_sets, (time.time() - t0)/60)
+    print 'Total time for set %s of %s: %.1f minutes' % (set_count + 1, total_sets, (time.time() - t0)/60)"""
 
 
 def predict_set_in_pieces(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, n_pieces=10):
@@ -1087,7 +1135,7 @@ def fill_tile_band(tile_size, ar_pred, tile_inds, nodata):
     # Fill just the part of the array that overlaps
     try:
         ar_tile = np.full(tile_size, np.nan)
-        ar_pred = ar_pred.astype(np.float32)
+        ar_pred = ar_pred.astype(np.float16)
         ar_pred[ar_pred == nodata] = np.nan
 
         ar_tile[tile_inds[0]:tile_inds[1], tile_inds[2]:tile_inds[3]] = ar_pred
@@ -1636,7 +1684,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     ar_vote = np.full((ysize, xsize), nodata, dtype=np.uint8)
     #ar_stdv = np.full((ysize, xsize), nodata, dtype=np.int16)
     #ar_coun = np.full((ysize, xsize), nodata, dtype=np.uint8)
-    ar_impr = np.full((ysize, xsize), nodata, dtype=np.uint8)
+    #ar_impr = np.full((ysize, xsize), nodata, dtype=np.uint8)
     ar_pcvt = np.full((ysize, xsize), nodata, dtype=np.uint8)
     #ar_wtmn_10 = np.full((ysize, xsize), nodata, dtype=np.int16)#'''
     #ar_wtmn_20 = np.full((ysize, xsize), nodata, dtype=np.int16)
@@ -1659,7 +1707,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     df_tiles = df_tiles.select(lambda x: x not in empty_tiles)
     total_tiles = len(df_tiles)
 
-    # Get feature importances and max importance per set
+    '''# Get feature importances and max importance per set
     t1 = time.time()
     print 'Getting importance values...'
     importance_list = []
@@ -1721,7 +1769,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
             pred_band = fill_tile_band(this_size, ar_pred, tile_inds, nodata)
             pred_bands.append(pred_band)
             
-            # Get feature with maximum importance and fill tile with that val
+            ''' # Get feature with maximum importance and fill tile with that val
             try:
                 with open(s_row.dt_file, 'rb') as f: 
                     dt_model = pickle.load(f)
@@ -1737,14 +1785,14 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
             
         ar_tile = np.dstack(pred_bands)
-        nd_impr = np.dstack(importance_bands)
+        #nd_impr = np.dstack(importance_bands)
         del pred_bands, importance_bands#, ar_import
         t3 = time.time()
         #this_mean = np.nanmean(ar_tile, axis=2)
         this_vote = mode(ar_tile, axis=2)
         #this_stdv = np.nanstd(ar_tile, axis=2) * 100 #Multiply b/c converting to int
         this_coun = np.sum(~np.isnan(ar_tile), axis=2)
-        this_impr = mode(nd_impr, axis=2)
+        #this_impr = mode(nd_impr, axis=2)
         this_pcvt = pct_vote(ar_tile, this_vote, this_coun)
         #this_wtmn_10 = weighted_mean(ar_tile, this_vote, c=10)
         #this_wtmn_20 = weighted_mean(ar_tile, this_vote, c=20)
@@ -1752,7 +1800,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         nans = np.isnan(this_vote)
         #this_mean[nans] = nodata
         #this_stdv[nans] = nodata
-        this_impr[nans] = nodata
+        #this_impr[nans] = nodata
         this_vote[nans] = nodata
         #this_coun[nans] = nodata
         this_pcvt[nans] = nodata
@@ -1768,7 +1816,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
         ar_vote[ul_r : lr_r, ul_c : lr_c] = this_vote.astype(np.uint8)
         #ar_stdv[ul_r : lr_r, ul_c : lr_c] = this_stdv.astype(np.int16)
         #ar_coun[ul_r : lr_r, ul_c : lr_c] = this_coun
-        ar_impr[ul_r : lr_r, ul_c : lr_c] = this_impr
+        #ar_impr[ul_r : lr_r, ul_c : lr_c] = this_impr
         ar_pcvt[ul_r : lr_r, ul_c : lr_c] = this_pcvt
         #ar_wtmn_10[ul_r : lr_r, ul_c : lr_c] = this_wtmn_10
         #ar_wtmn_20[ul_r : lr_r, ul_c : lr_c] = this_wtmn_20
@@ -1776,7 +1824,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     #Mask arrays
     #ar_mean[~mask] = nodata
     ar_vote[~mask] = nodata
-    ar_impr[~mask] = nodata
+    #ar_impr[~mask] = nodata
     #ar_coun[~mask] = nodata
     ar_pcvt[~mask] = nodata
     #ar_stdv[~mask] = nodata * 100
@@ -1784,7 +1832,7 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     # Write final rasters to disk
     out_template = os.path.join(out_dir, file_stamp + '_%s.bsq')
     out_path = out_template % 'mean'
-    #mosaic.array_to_raster(ar_mean, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
+    #mosaic.array_to_raster(ar_mean, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata)
     
     out_path = out_template % 'vote'
     mosaic.array_to_raster(ar_vote, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata)   
@@ -1796,16 +1844,11 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     #mosaic.array_to_raster(ar_coun, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
     
     out_path = out_template % 'importance'
-    mosaic.array_to_raster(ar_impr, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata)  
+    #mosaic.array_to_raster(ar_impr, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata)  
     
     out_path = out_template % 'pct_vote'
     mosaic.array_to_raster(ar_pcvt, mosaic_tx, prj, driver, out_path, GDT_Byte, nodata) 
     
-    #out_path = os.path.join(out_dir, file_stamp + '_weightedmean_10.bsq')
-    #mosaic.array_to_raster(ar_wtmn_10, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = os.path.join(out_dir, file_stamp + '_weightedmean_20.bsq')
-    #mosaic.array_to_raster(ar_wtmn_20, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
     
     print '\nTotal aggregation run time: %.1f hours' % ((time.time() - t0)/3600)
     #return predictions, df_sets, df_train
@@ -1813,8 +1856,8 @@ def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size
     #return ar_out
     #del ar_impr, ar_pred, ar_stdv, ar_tile, this_impr, this_mean, this_stdv, #this_vote, #this_wtmn_20, ar_coun, this_coun, this_wtmn_10, ar_wtmn_20, ar_wtmn_10
     
-    ar_mean = None
-    return ar_mean, ar_vote, pct_import, df_sets#"""
+    ar_vote, pct_import = None, None
+    return ar_vote, pct_import, df_sets#"""
     
 
 def evaluate_ebird(sample_txt, ar, tx, cell_size, target_col, n_per_cell, n_trials=50, year=None):
@@ -1981,6 +2024,22 @@ def predict_set_from_disk(df_sets, set_id, params):
     tx = this_set.ul_x, x_res, x_rot, this_set.ul_y, y_rot, y_res
     mosaic.array_to_raster(ar_predict, tx, prj, driver, out_path, GDT_Int32)'''
 
+def get_gdal_dtype(type_code):
+    
+    code_dict = {1: gdal.GDT_Byte,
+                 2: gdal.GDT_UInt16,
+                 3: gdal.GDT_Int16,
+                 4: gdal.GDT_UInt32,
+                 5: gdal.GDT_Int32,
+                 6: gdal.GDT_Float32,
+                 7: gdal.GDT_Float64,
+                 8: gdal.GDT_CInt16,
+                 9: gdal.GDT_CInt32,
+                 10: gdal.GDT_CFloat32,
+                 11: gdal.GDT_CFloat64
+                 }
+    
+    return code_dict[type_code]
 
 
 

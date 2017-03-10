@@ -17,8 +17,7 @@ from multiprocessing import Pool
 import numpy as np
 
 import stem
-from mosaic_by_tsa import array_to_raster
-#import aggregate_stem as aggr
+import mosaic_by_tsa as mosaic
     
 gdal.UseExceptions()
 
@@ -118,23 +117,41 @@ def main(params, inventory_txt=None, constant_vars=None):
     
     t0 = time.time()
     if 'n_jobs' in inputs:
+
         # Predict in parallel
         n_jobs = int(n_jobs)
         args = []
+        t1 = time.time()
+        print 'Predicting in parallel with %s jobs...' % n_jobs
+        print 'Building args and making rasters of TSA arrays...'
         for c, (set_id, row) in enumerate(df_sets.iterrows()):
+            
+            # Save rasters of tsa arrays ahead of time to avoid needing to pickle or fork mosaic_ds
             coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-            if c < 10: print c, coords.values/30
-            forked_ds = stem.ForkedData(mosaic_ds)
-            args.append([c, total_sets, set_id, df_var, forked_ds, coords, 
-                         mosaic_tx, xsize, ysize, row.dt_file, nodata, np.int16, 
+            tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords, mosaic_tx,
+                            xsize, ysize, nodata=nodata)
+            tsa_raster = os.path.join(predict_dir, 'tsa_%s.bsq' % set_id)
+            tx_out = row.ul_x, mosaic_tx[1], mosaic_tx[2], row.ul_y, mosaic_tx[4], mosaic_tx[5]
+            dtype_code = mosaic_ds.GetRasterBand(1).DataType
+            mosaic.array_to_raster(tsa_ar, tx_out, prj, driver, tsa_raster, stem.get_gdal_dtype(dtype_code), silent=True)
+            
+            # Build list of args to pass to the Pool
+            tsa_raster = os.path.join(predict_dir, 'tsa_%s.bsq' % set_id)
+            ds = gdal.Open(tsa_raster)
+            tsa_tx = ds.GetGeoTransform()
+            ds = None
+            tsa_off = stem.calc_offset((mosaic_tx[0], mosaic_tx[3]), (tsa_tx[0], tsa_tx[3]), tsa_tx)
+            args.append([c, total_sets, set_id, df_var, tsa_raster, tsa_off, coords, 
+                         mosaic_tx, xsize, ysize, row.dt_file, nodata, np.uint8, 
                          constant_vars, predict_dir])
+        print '%.1f minutes\n' % ((time.time() - t1)/60)
         p = Pool(n_jobs)
         p.map(stem.par_predict, args, 1)
             
     
     else:
         # Loop through each set and generate predictions
-        for c, (set_id, row) in enumerate(df_sets.ix[2083:].iterrows()):
+        for c, (set_id, row) in enumerate(df_sets.ix[1043:].iterrows()):
             t1 = time.time()
             with open(row.dt_file, 'rb') as f: 
                 dt_model = pickle.load(f)
@@ -145,19 +162,19 @@ def main(params, inventory_txt=None, constant_vars=None):
                                      np.int16, constant_vars)        
             tx = coords.ul_x, x_res, x_rot, coords.ul_y, y_rot, y_res
             out_path = os.path.join(predict_dir, 'prediction_%s.bsq' % set_id)
-            array_to_raster(ar_predict, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
+            mosaic.array_to_raster(ar_predict, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
             print 'Total time for this set: %.1f minutes' % ((time.time() - t1)/60)
     
         #mosaic_ds = None                  
-        print '\nTotal time for predicting: %.1f hours\n' % ((time.time() - t0)/3600)#'''
+    print '\nTotal time for predicting: %.1f hours\n' % ((time.time() - t0)/3600)#'''
     
     #Aggregate predictions by tile and stitch them back together
     if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
-    ar_mean, ar_vote, pct_importance, df_sets = stem.aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size, predict_dir, df_sets, out_dir, file_stamp, prj, driver, 0)
+    ar_vote, pct_importance, df_sets = stem.aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size, predict_dir, df_sets, out_dir, file_stamp, prj, driver, 0)
     #df_sets.to_csv(set_txt, sep='\t')'''
     mosaic_ds = None
     
-    # Save the importance values
+    '''# Save the importance values
     importance = pd.DataFrame({'variable': pred_vars,
                                'pct_importance': pct_importance,
                                'index': range(len(pred_vars))
@@ -180,7 +197,7 @@ def main(params, inventory_txt=None, constant_vars=None):
         vote_dir = os.path.join(model_dir, 'evaluation_vote')
         mean_dir = os.path.join(model_dir, 'evaluation_mean')
         
-        print '\nComputing confusion matrix for vote...'
+        '''print '\nComputing confusion matrix for vote...'
         out_txt = os.path.join(vote_dir, 'confusion.txt')
         print confusion_params
         df_v = confusion.main(confusion_params, ar_vote, out_txt, match=True)
@@ -188,16 +205,16 @@ def main(params, inventory_txt=None, constant_vars=None):
             out_txt = os.path.join(vote_dir, 'confusion_avg_kernel.txt')
             df_v_off = confusion.main(confusion_params, ar_vote, out_txt)
         except Exception as e:
-            print e
+            print e'''
         
-        '''print '\nGetting confusion matrix for mean...'
+        print '\nGetting confusion matrix for mean...'
         out_txt = os.path.join(mean_dir, 'confusion.txt')
         df_m = confusion.main(confusion_params, ar_mean, out_txt, match=True)
-        try:
+        '''try:
             out_txt = os.path.join(mean_dir, 'confusion_avg_kernel.txt')
             df_m_off = confusion.main(confusion_params, ar_mean, out_txt)
         except Exception as e:
-            print e'''
+            print e#'''
         
         vote_acc = df_v.ix['producer', 'user']
         vote_kap = df_v.ix['producer', 'kappa']
