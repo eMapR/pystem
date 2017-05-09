@@ -1,6 +1,6 @@
 #STEM (SpatioTemporal Exploratory Model)
 
-##Overview
+###Overview
 The STEM is an ensemble of locally defined, randomly located, spatially overalpping decision trees and generates a final prediction by aggregating over all overlapping pixels with either the mean, mode, or weighted mean. These scripts offer a Python implementation of the STEM algorithm developed by Fink and others (2010)
 
 [Processing workflow](https://docs.google.com/document/d/1Weg1KNnGq-rMyaGvv3OvbWbYglNOYVOywyK6w3trtyc/edit?usp=sharing)
