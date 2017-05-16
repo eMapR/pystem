@@ -478,7 +478,7 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
             ' param file:\n%s\n. Re-run script with either of these' +\
             ' parameters given.' % params)
     if 'kernel' in inputs:
-        if inputs[kernel].lower() == 'true':
+        if inputs['kernel'].lower() == 'true':
             kernel = True
     
     # Get the TSA mosaic as an array
