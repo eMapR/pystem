@@ -4,8 +4,10 @@ import sys
 import fnmatch
 import pandas as pd
 import numpy as np
-from osgeo import gdal
+from osgeo import gdal, gdal_array, ogr
 from gdalconst import *
+
+gdal.UseExceptions()
 
 
 def read_params(params):
@@ -131,7 +133,7 @@ def get_array(filepath, data_band, coords):
         ysize = ds.RasterYSize
         ar, offsets = extract_kernel(ds, data_band, coords, tx, xsize, ysize)
         row_off, col_off = offsets
-        
+    
     return tx, ar, row_off, col_off
 
 
@@ -185,19 +187,94 @@ def get_offset_array_indices(ar1_shape, ar2_shape, ar2_offset):
     ar2_bounds = ar2_row_u, ar2_row_d, ar2_col_l, ar2_col_r
     
     return ar1_bounds, ar2_bounds
+    
 
+def kernel_from_shp(mosaic_lyr, coords, mosaic_tx, nodata, val_field='name'):
+    
+    # Get rid of the annoying warning about spatial refs when rasterizing
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
+    
+    ul_x, x_res, _, ul_y, _, y_res = mosaic_tx
 
-def extract_kernel(ds, data_band, ar_coords, transform, xsize, ysize, nodata=0):
+    #wkt = 'POLYGON (({0} {1}, {2} {3}, {4} {5}, {6} {7}))'.format(coords.ul_x,coords.ul_y, coords.lr_x, coords.ul_y, coords.lr_x, coords.lr_y, coords.ul_x, coords.lr_y)
+    wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}))'.format(coords.ul_x,coords.ul_y, coords.lr_x, coords.lr_y)
+    support_set = ogr.CreateGeometryFromWkt(wkt)
+    support_set.CloseRings()
+
+    ''' figure out a better way to compute intersection than looping though'''
+    #intersection = ogr.Geometry(ogr.wkbMultiPolygon)
+    
+    # Create the raster datasource and the intersection layer in memory
+    mem_driver = ogr.GetDriverByName('Memory')
+    ras_driver = gdal.GetDriverByName('MEM')
+    ds_mem = mem_driver.CreateDataSource('mem')
+    intersection_lyr = ds_mem.CreateLayer('poly', None, ogr.wkbPolygon)
+    lyr_def = mosaic_lyr.GetLayerDefn()
+    for i in range(lyr_def.GetFieldCount()):
+        field_def = lyr_def.GetFieldDefn(i)
+        intersection_lyr.CreateField(field_def)
+    for i in xrange(mosaic_lyr.GetFeatureCount()):
+        feature = mosaic_lyr.GetFeature(i)
+        g = feature.GetGeometryRef()
+        g.CloseRings()
+        if g.Intersects(support_set):
+            intersected_geom = g.Intersection(support_set)
+            intersected_feature = ogr.Feature(lyr_def)
+            intersected_feature.SetGeometry(intersected_geom)
+            
+            for i in range(lyr_def.GetFieldCount()):
+                name = lyr_def.GetFieldDefn(i).GetName()
+                val = feature.GetField(i)
+                intersected_feature.SetField(name, val)
+            intersection_lyr.CreateFeature(intersected_feature.Clone())
+            feature.Destroy()
+            intersected_feature.Destroy()
+
+    #Get number of rows and cols of the output array and the input layer
+    x1, x2, y1, y2 = support_set.GetEnvelope()
+    cols = abs(int((x2 - x1)/x_res))
+    rows = abs(int((y2 - y1)/y_res))
+    
+    m_xmin, m_xmax, m_ymin, m_ymax = mosaic_lyr.GetExtent()
+    xsize = abs(int((m_xmax - m_xmin)/x_res))
+    ysize = abs(int((m_ymax - m_ymin)/y_res))
+    
+    tx = x1, x_res, 0, y2, 0, y_res #Assumes x > to the east, y > north
+    offset = calc_offset((m_xmin, m_ymax), tx)
+    
+    ''' Figuer out how to burn nodata values directly with Rasterize() rather than with mask'''
+    
+    ds_ras = ras_driver.Create('', cols, rows, 1, gdal.GDT_Int32)
+    ds_mask = ras_driver.Create('', cols, rows, 1, gdal.GDT_Byte)
+    ds_ras.SetGeoTransform(tx)
+    ds_mask.SetGeoTransform(tx)
+    gdal.RasterizeLayer(ds_ras, [1], intersection_lyr, options=["ATTRIBUTE=%s" % val_field])
+    gdal.RasterizeLayer(ds_mask, [1], intersection_lyr, burn_values=[1])
+    ar = ds_ras.ReadAsArray()
+    mask = ds_mask.ReadAsArray().astype(bool)
+    ar[~mask] = nodata
+    ds_ras = None
+    ds_mask = None
+    ds_mem.Destroy()
+
+    _, array_inds = get_offset_array_indices((ysize, xsize), (rows, cols), offset)
+    ul_row, ar_row_lr, ar_col_ul, ar_col_lr = array_inds
+    offset = array_inds[2], array_inds[0]
+
+    return ar, offset
+    
+    
+def extract_kernel(ds, data_band, ar_coords, tx, xsize, ysize, nodata=0):
     
     ul_x, ul_y, lr_x, lr_y = ar_coords #Projected coords
     #xsize -= 1 #xsize and ysize are number of row/cols, not index of last row/col
     #ysize -= 1
 
-    cols = int((lr_x - ul_x)/transform[1])
-    rows = int((lr_y - ul_y)/transform[5])
+    cols = int((lr_x - ul_x)/tx[1])
+    rows = int((lr_y - ul_y)/tx[5])
     
-    xoffset = int((ul_x - transform[0])/transform[1])
-    yoffset = int((ul_y - transform[3])/transform[5])
+    xoffset = int((ul_x - tx[0])/tx[1])
+    yoffset = int((ul_y - tx[3])/tx[5])
     
     # Get offsets and number of rows/cols for the data array
     ds_inds, array_inds = get_offset_array_indices((ysize, xsize), (rows, cols), (yoffset, xoffset))
@@ -215,7 +292,7 @@ def extract_kernel(ds, data_band, ar_coords, transform, xsize, ysize, nodata=0):
     return ar, (ar_row_ul, ar_col_ul)
     
     
-def replace_val_with_array(tsa_ar, data_ar, tsa_id, offset):
+def replace_val_with_array(tsa_ar, data_ar, tsa_id, offset, ar_out):
     '''
     Replace tsa_ar in place where tsa_ar == tsa_id and where the two 
     overlap according to offset
@@ -231,36 +308,101 @@ def replace_val_with_array(tsa_ar, data_ar, tsa_id, offset):
     tsa_view = tsa_ar[tsa_row_u : tsa_row_d, tsa_col_l : tsa_col_r]
     tsa_mask = tsa_view == tsa_id
         
+    #np.copyto(tsa_view, data_view, where=tsa_mask)
+    ar_out[tsa_row_u : tsa_row_d, tsa_col_l : tsa_col_r][tsa_mask] = data_view[tsa_mask]
 
-    np.copyto(tsa_view, data_view, where=tsa_mask)
-         
 
-def array_to_raster(array, tx, prj, driver, out_path, dtype, nodata=None):
+
+def get_min_numpy_dtype(ar):
+    
+    max_val = ar.max()
+    min_val = ar.min()
+    
+    if int(max_val) == max_val: #no loss of precision
+        if min_val >= -128 and max_val <= 127:
+            return np.int8
+        
+        if min_val <= 0 and max_val <= 255:
+            return np.uint8
+        
+        if min_val <= -32768 and max_val >= 32767:
+            return np.int16
+            
+        if min_val <= 0 and max_val >= 65535:
+            return np.uint16
+        else:
+            return np.int32 # Shouldn't be necessary to have unsigned int32
+    else:
+        return np.float32 # Not very safe, but probably suits our needs
+    
+    
+def numpy_to_gdal_dtype(np_dtype):
+    
+    dtype_dict = {np.int8:   gdal.GDT_Byte,
+                  np.uint8:  gdal.GDT_Byte,
+                  np.int16:  gdal.GDT_Int16,
+                  np.uint16: gdal.GDT_UInt16,
+                  np.int32:  gdal.GDT_Int32,
+                  np.int64:  gdal.GDT_Int64,
+                  np.float32: gdal.GDT_Float32,
+                  np.float64: gdal.GDT_Float64
+                  }
+                  
+    return dtype_dict[np_dtype]
+
+
+def get_gdal_dtype(type_code):
+    
+    code_dict = {1: gdal.GDT_Byte,
+                 2: gdal.GDT_UInt16,
+                 3: gdal.GDT_Int16,
+                 4: gdal.GDT_UInt32,
+                 5: gdal.GDT_Int32,
+                 6: gdal.GDT_Float32,
+                 7: gdal.GDT_Float64,
+                 8: gdal.GDT_CInt16,
+                 9: gdal.GDT_CInt32,
+                 10: gdal.GDT_CFloat32,
+                 11: gdal.GDT_CFloat64
+                 }
+    
+    return code_dict[type_code]
+
+
+def array_to_raster(array, tx, prj, driver, out_path, dtype=None, nodata=None, silent=False):
     # From intersectMask.py
     '''
     Save a numpy array as a new raster
     '''
-    print 'Saving raster...'
-    rows,cols = array.shape
-    #save new raster
-    out_ds = driver.Create(out_path, cols, rows, 1, dtype)
+    if not silent: print 'Saving raster...'
+    rows, cols = array.shape
+    
+    # Save new raster
+    if not dtype:
+        np_dtype = get_min_numpy_dtype(array)
+        array = array.astype(np_dtype)
+        dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
+    if driver.ShortName == 'GTiff':
+        out_ds = driver.Create(out_path, cols, rows, 1, dtype, ['TILED=YES'])
     if out_ds is None:
-        print sys.exit('\nCould not create ' + out_path)
-    #write the data
+        sys.exit('\nCould not create ' + out_path)
+    
+    # Write the data
     band = out_ds.GetRasterBand(1)
     band.WriteArray(array)
-    #flush data to disk
+    
+    # Flush data to disk
     band.FlushCache()
     if nodata != None: band.SetNoDataValue(nodata)
 
-    #georeference the image and set the projection
+    # Georeference the image and set the projection
     out_ds.SetGeoTransform(tx)
     out_ds.SetProjection(prj)
-    print 'Raster written to:\n', out_path
+    if not silent: print 'Raster written to:\n', out_path
     
 
 #def get_mosaic(mosaic_tx, tsa_ar, tsa_off, ar_coords, tsa_txt,  data_band, files=None, basepath=None, search_str=None, path_filter=None, out_path=None, prj=None, driver=None):
-def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords,  data_band, files=None, **kwargs):
+def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords, data_band, set_id, files=None, **kwargs):
 
     ul_x, ul_y, lr_x, lr_y = ar_coords
 
@@ -286,14 +428,15 @@ def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords,  data_band, files=None, **
     df_ars = pd.DataFrame(data_ars, index=df.index, 
                           columns=['data_tx', 'data_array', 'yoff', 'xoff'])
     df[['data_tx', 'data_array', 'yoff', 'xoff']] = df_ars
-    
+        
     # Replace each tsa_id in tsa_ar with data values. But first, make 
     #   tsa_ar of the same dtype as the data arrays.
     #tsa_ar = tsa_ar.astype(df.ix[df.index.min(), 'data_array'].dtype)
-    
-    [replace_val_with_array(tsa_ar, row['data_array'], row['tsa_id'],
-                            (row['yoff'],row['xoff'])) 
-                            for ind, row in df.iterrows()]
+    ar_out = tsa_ar.copy()
+    for ind, row in df.iterrows():
+        replace_val_with_array(tsa_ar, row['data_array'], row['tsa_id'],
+                               (row['yoff'],row['xoff']), ar_out) 
+                            
     
     # Save the new mosaic as a raster if out_path is specified
     if 'out_path' in locals():
@@ -302,7 +445,7 @@ def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords,  data_band, files=None, **
         ''' fix dtype so that it can be a float if the array is'''
     del df_ars, df
     
-    return tsa_ar.astype(np.int32)
+    return ar_out.astype(np.int32)
 
 
 def main(mosaic_path, basepath, search_str, ar_coords, data_band):
@@ -324,57 +467,6 @@ def main(mosaic_path, basepath, search_str, ar_coords, data_band):
     ar = get_mosaic(tx_tsa, tsa_strs, ar_tsa, ar_coords, data_band)
     
     return ar
-
-    
-''' ###### Testing ###### '''
-
-
-##x, y = -1900000, 2770000
-#x, y = -2040000, 2750000
-#x2, y2 = -1830000, 2675000
-#cols = 4000
-#rows = 4000
-#tsa_txt = '/vol/v2/stem/scripts/tsa_orwaca.txt'
-
-
-"""mosaic_path = '/vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq'
-'''ul_x = -1628643
-ul_y = 3203960
-lr_x = -1328643
-lr_y = 2803960 '''                                
-
-basepath = '/vol/v1/scenes'
-#basepath = '/vol/v3/scenes'
-search_str = '*_mse_split.bsq'
-#search_str = '*2010_*ledaps.bsq'
-path_filter = None
-out_dir = '/home/server/student/homes/shooper'
-data_band = 18
-
-ds = gdal.Open(mosaic_path)
-ar_tsa = ds.ReadAsArray()
-tx = ds.GetGeoTransform()
-xsize = ds.RasterXSize
-ysize = ds.RasterYSize
-ul_x, x_res, _, ul_y, _, y_res = tx
-ar_coords = [ul_x,
-             ul_y,
-             ul_x + (xsize * x_res), 
-ul_y + (ysize * y_res)]
-#ar, off = extract_kernel(ds, 1, ar_coords, tx, xsize, ysize)
-
-prj = ds.GetProjection()
-driver = ds.GetDriver()
-m_ulx, x_res, x_rot, m_uly, y_rot, y_res = tx
-tx1 = ul_x, x_res, x_rot, ul_y, y_rot, y_res
-ds = None
-#out_dir = '/vol/v2/stem/scripts/testing'
-out_path = os.path.join(out_dir, 'mse_CAORWA.bsq')
-
-ar = main(mosaic_path, basepath, search_str, ar_coords, data_band)
-nodata_mask = ar_tsa == 0
-ar[nodata_mask] == -9999
-array_to_raster(ar, tx, prj, driver, out_path, GDT_Int16, nodata=-9999)#"""
 
     
     
