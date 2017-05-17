@@ -144,10 +144,6 @@ def get_raster_bounds(raster):
     max_x = max(ul_x, lr_x)
     max_y = max(ul_y, lr_y)
     
-    # Need to know if x increases l or r and if y increases up or down
-    #x_res_sign = int(x_res/abs(x_res))
-    #y_res_sign = int(y_res/abs(y_res))
-    
     return min_x, min_y, max_x, max_y, x_res, y_res, tx
     
 
@@ -159,7 +155,6 @@ def generate_gsrd_grid(cell_size, min_x, min_y, max_x, max_y, x_res, y_res):
     
     # Get a randomly defined coordinate within the study area for a seed
     #  upper left coord
-    
     seed_x = random.randint(min_x, max_x)
     seed_y = random.randint(min_y, max_y)
     
@@ -171,7 +166,7 @@ def generate_gsrd_grid(cell_size, min_x, min_y, max_x, max_y, x_res, y_res):
     ncells_less_y = int((seed_y - min_y)/y_size)
     ncells_more_y = int((max_y - seed_y)/y_size + 1)
     
-    # Calculate the ul of each cell
+    # Calculate the ul coordinate of each cell
     ul_x = sorted([seed_x - (i * x_size) for i in range(ncells_less_x + 1)])
     ul_x.extend([seed_x + (i * x_size) for i in range(1, ncells_more_x + 1)])
     ul_y = sorted([seed_y - (i * y_size) for i in range(ncells_less_y + 1)])
@@ -198,9 +193,11 @@ def sample_gsrd_cell(n, cell_bounds, x_size, y_size, x_res, y_res, tx, snap_coor
     min_y, max_y = min(ul_y, lr_y), max(ul_y, lr_y)
     
     # Calculate support set centers and snap them to the ultimate raster grid
+    #   Use the snap coordinate if given
     if snap_coord:
         x_remain = snap_coord[0] % x_res
         y_remain = snap_coord[1] % y_res
+    # Otherwise just use the ul corner of the dataset bounding box
     else:
         x_remain = (tx[0] % x_res)
         y_remain = (tx[3] % y_res)
@@ -218,14 +215,10 @@ def sample_gsrd_cell(n, cell_bounds, x_size, y_size, x_res, y_res, tx, snap_coor
     ul_y_ls = [int(round(y - ((y_size/2 + y_remain) * y_res_sign), 0)) for y in y_centers]
     lr_y_ls = [int(round(y + ((y_size/2 - y_remain) * y_res_sign), 0)) for y in y_centers]
 
-    #numeric_bounds = zip(min_x_ls, min_y_ls, max_x_ls, max_y_ls)
+    # Store coords for each support set in a dataframe
     these_bounds = zip(ul_x_ls, ul_y_ls, lr_x_ls, lr_y_ls, x_centers, y_centers)
-    #df = pd.DataFrame(numeric_bounds, columns=['min_x', 'min_y', 'max_x', 'max_y'])
     columns = ['ul_x', 'ul_y', 'lr_x', 'lr_y', 'ctr_x', 'ctr_y']
     df = pd.DataFrame(these_bounds, columns=columns)
-    
-    #prj_cols = ['ul_x', 'ul_y', 'lr_x', 'lr_y']
-    #df[prj_cols] = prj_bounds
     
     return df
 
@@ -234,6 +227,7 @@ def split_train_test(df, pct_train=.8):
     '''
     Return two dataframes: one of training samples and the other testing. 
     '''
+    # Get unique combinations of row/col
     unique = [(rc[0],rc[1]) for rc in df[['row','col']].drop_duplicates().values]
     n_train = int(len(unique) * pct_train)
     
@@ -590,6 +584,18 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
      
     if tsa_str: 
         bp = os.path.join(basepath, tsa_str)
+        if not os.path.isdir(bp):
+            exists = False
+            for i in range(10):
+                # Try adding leading zeros and check for an existing direcoty
+                tsa_str = '0' + tsa_str
+                bp = os.path.join(basepath, tsa_str)
+                if os.path.isdir(bp):
+                    exists = True
+                    break
+            if not exists:
+                raise IOError(('Cannot find tile directory with basepath %s and'+\
+                'tile_str %s or up to 10 leading zeros') % (basepath, tsa_str))
 
         # Search the bp directory tree. If search_str is in a file, get the full path.
         paths = []
@@ -723,9 +729,9 @@ def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob
     df_train : DataFrame of training samples
     oob_dict : dict
         Dictionary of sample indices indicating which samples are OOB for each support set in 
-    @parameter target_col - string of the target column name
-    @parameter predict_cols - list-like of string prediction column names
-    @parameter min_oob - int minimum OOB score. All sets with OOB score < min_oob will be dropped. Default = 0.
+    target_col : string of the target column name
+    predict_cols : list-like of string prediction column names
+    min_oob : int minimum OOB score. All sets with OOB score < min_oob will be dropped. Default = 0.
     
     Returns
     -------
@@ -756,7 +762,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
     
     df_tiles, df_tiles_rc, tile_size = get_tiles(n_tiles, xsize, ysize, tx)
     total_tiles = len(df_tiles)
-    coords_to_shp(df_tiles, '/vol/v2/stem/conus_testing/models/landcover_20170420_1347/gsrd_sets.shp', '/vol/v2/stem/conus_testing/models/landcover_20170503_1820/ag_tiles.shp')
+    #coords_to_shp(df_tiles, '/vol/v2/stem/conus_testing/models/landcover_20170420_1347/gsrd_sets.shp', '/vol/v2/stem/conus_testing/models/landcover_20170503_1820/ag_tiles.shp')
     # Find the tiles that have only nodata values
     '''t1 = time.time()
     print '\nFinding empty tiles...'
@@ -797,8 +803,8 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             tile_mask = tile_mask != -9999
         # If it's empty, skip and add it to the list
         if not tile_mask.any():
-            empty_tiles.append(i)
-            print ''
+            empty_tiles.append(tile_id)
+            print 'Tile empty. Skipping...\n'
             continue
 
         # Calculate the size of this tile in case it's at the edge where the
@@ -862,6 +868,8 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             tile_rows = rc.lr_r - rc.ul_r
             tile_cols = rc.lr_c - rc.ul_c
             tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_id, stat))
+            if not os.path.isfile(tile_file):
+                continue
             ds = gdal.Open(tile_file)
             ar_tile = ds.ReadAsArray()
             t_ulx = tile_coords[['ul_x', 'ul_y']]
@@ -882,27 +890,6 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
     return avg_dict, df_sets#"""
 
 
-def par_get_tile_array(args):
-    
-    coords, mosaic_type, mosaic_path, mosaic_tx, nodata, 
-    # Save rasters of tsa arrays ahead of time to avoid needing to pickle or fork mosaic
-    coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-    if mosaic_type == 'vector':
-        tsa_ar, tsa_off = mosaic.kernel_from_shp(mosaic_ds, coords, mosaic_tx, nodata=0)
-    else:
-        tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords,
-                                                mosaic_tx, xsize, ysize,
-                                                nodata=nodata)
-    set_mosaic_path = os.path.join(predict_dir, 'tsa_%s.tif' % set_id)
-    tx_out = row.ul_x, mosaic_tx[1], mosaic_tx[2], row.ul_y, mosaic_tx[4], mosaic_tx[5]
-    np_dtype = get_min_numpy_dtype(tsa_ar)
-    gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
-    mosaic.array_to_raster(tsa_ar, tx_out, prj, driver, set_mosaic_path, gdal_dtype, silent=True)
-    pct_progress = float(c + 1)/total_sets * 100
-    sys.stdout.write('\rRetreived points for feature %s of %s (%%%.1f)' % (c + 1, total_sets, pct_progress))
-    sys.stdout.flush()
-
-
 def get_predict_array(args):
 
     ar = mosaic_by_tsa.get_mosaic(*args[1:])
@@ -918,10 +905,10 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
     predictors = []
     for ind, var in enumerate(df_var.index):
         #this_tile_ar = np.copy(tile_ar)
-        data_band, search_str, basepath, by_tsa, path_filter = df_var.ix[var]
+        data_band, search_str, basepath, by_tile, path_filter = df_var.ix[var]
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
         
-        if by_tsa:
+        if by_tile:
             files = [find_file(basepath, search_str, tile, path_filter) for tile in tile_strs]
             ar_var = mosaic_by_tsa.get_mosaic(mosaic_tx, tile_strs, tile_ar, coords, data_band, set_id, files)
             
@@ -962,9 +949,10 @@ def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, 
                                                 xsize, ysize, nodata=nodata)
     tile_mask = tile_ar == 0
     tile_ar[tile_mask] = nodata
+    
     # Get the ids of TSAs this kernel covers
     tile_ids = np.unique(tile_ar)
-    tile_strs = ['0' + str(tsa) for tsa in tile_ids if tsa!=nodata]
+    tile_strs = [str(t) for t in tile_ids if t != nodata]
     array_shape = tile_ar.shape
 
     # Get an array of predictors where each column is a flattened 2D array of a
@@ -1017,9 +1005,9 @@ def par_predict(args):
         tile_mask = tile_ar == 0
         tile_ar[tile_mask] = nodata
         
-        # Get the ids of TSAs this kernel covers
+        # Get the ids of tiles this kernel covers
         tile_ids = np.unique(tile_ar)
-        tile_strs = ['0' + str(tile) for tile in tile_ids if tile != nodata]
+        tile_strs = [str(tile) for tile in tile_ids if tile != nodata]
         array_shape = tile_ar.shape
     
         # Get an array of predictors where each column is a flattened 2D array of a

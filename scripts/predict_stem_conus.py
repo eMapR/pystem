@@ -128,7 +128,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     total_sets = len(df_sets)
     
-    """t0 = time.time()
+    t0 = time.time()
     if 'n_jobs_pred' in inputs:
         n_jobs = int(n_jobs_pred)
         # Predict in parallel
@@ -177,7 +177,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
                                      mosaic_tx, xsize, ysize, dt_model, nodata,
                                      np.int16, constant_vars)        
             tx = coords.ul_x, x_res, x_rot, coords.ul_y, y_rot, y_res
-            out_path = os.path.join(predict_dir, 'prediction_%s.bsq' % set_id)
+            out_path = os.path.join(predict_dir, 'prediction_%s.tif' % set_id)
             np_dtype = get_min_numpy_dtype(ar_predict)
             gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
             mosaic.array_to_raster(ar_predict, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
