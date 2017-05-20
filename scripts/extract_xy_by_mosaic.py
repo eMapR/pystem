@@ -114,9 +114,7 @@ def within(x, y, poly):
 
     # Check if point is on a boundary
     n_vertices = len(poly)
-    
-    for i in xrange(n_vertices):
-        
+    for i in xrange(n_vertices): 
         if i == 0:
             x1, y1 = poly[0]
             x2, y2 = poly[1]
@@ -140,23 +138,21 @@ def within(x, y, poly):
     import pdb; pdb.set_trace()
     if y == ymax or x == xmin:
         return True'''
-            
-            
 
-    if (y == y2 and y == y1) or (x == x2 and x == x1):
-            return True
-        
-      
+    '''if (y == y2 and y == y1) or (x == x2 and x == x1):
+            return True'''
+            
     inside = False
     x1, y1 = poly[0]
     for i in xrange(n_vertices + 1):
+        
         x2, y2 = poly[i % n_vertices]
-        if y > min(y1, y2):
+        if y > min(y1, y2): 
             if y <= max(y1, y2):
-                if x <= max(x1, x2):
+                if x < max(x1, x2):
                     if y1 != y2:
                         xints = (y - y1) * (x2 - x1) / (y2 - y1) + x1
-                        if x1 == x2 or x <= xints:
+                        if x1 == x2 or x < xints:
                             inside = ~inside
         x1, y1 = x2, y2
 
@@ -315,7 +311,15 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
         df_file = df_file[(df_file.row - row_off < ysize) & (df_file.col - col_off < xsize)]
         
         if kernel:
-            ar = band.ReadAsArray()
+            if nodata == None:
+                nodata = -9999
+            
+            # Need to buffer the array because of extracting kernel at edges
+            ar = np.full((ysize + 2, xsize + 2), nodata, dtype=np.int16)
+            ar[1:-1, 1:-1] = band.ReadAsArray()#'''
+            row_off += 1
+            col_off += 1
+            
             data_rows = [row - row_off + d for row in df_file.row for d in row_dirs]
             data_cols = [col - col_off + d for col in df_file.col for d in col_dirs]
             

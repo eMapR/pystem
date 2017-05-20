@@ -72,6 +72,10 @@ def find_file(basepath, tsa_str, search_str, path_filter=None):
         return None
      
     bp = os.path.join(basepath, tsa_str)
+    if not os.path.isdir(bp):
+        bp = os.path.join(basepath, '0' + tsa_str)
+        if not os.path.exists(bp):
+            raise IOError('Cannot find tile directory with basepath %s and tile_str %s or %s' % (basepath, tsa_str, '0' + tsa_str))
 
     # Search the bp directory tree. If search_str is in a file, get the full path.
     paths = []

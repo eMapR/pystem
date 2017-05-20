@@ -18,7 +18,7 @@ def plot_per_row(df, out_png, index_col=None, xlabels=None, label_col=None, xlab
     print 'Plotting stats...'
     #plt.style.use('ggplot')
     sns.set_style('white')
-    sns.set_context(context='paper', font_scale=1.4, rc={'patch.linewidth': 0})
+    sns.set_context(context='talk', font_scale=1.4, rc={'patch.linewidth': 0, 'face.color':79/255.0})
     
     if index_col:
         df.set_index(index_col, inplace=True)
@@ -375,27 +375,36 @@ def plot_importance(model_txt, species_list, search_dir, constant_vars, out_png)
 
 # Plot canopy and imperv stem/bdt stuff
 txt = '/home/server/student/homes/shooper/stem_ch1_figures/stem_bdt.txt'
-df = pd.read_csv(txt, sep='\t')
+df = pd.read_csv(txt, sep=',')
 colors = [[0.5, 0.5, 0.5],
           [0.9, 0.9, 0.9],
           [0.3, 0.3, 0.3],
           [0.7, 0.7, 0.7]
           ]
           
-colors = ['#268b85',
+#purple/green          
+'''colors = ['#268b85',
           '#6ec7c3',
           '#a5518c',
-          '#c997ba']
+          '#c997ba']#'''
           
+#burnt sienna/green          
 colors = ['#0b7478',
           '#16b5b8',
           '#d03821',
           '#fc7a6a'
+          ]#'''
+
+#muted burnt sienna/green
+colors = ['#1d7477',
+          '#2badb0',
+          '#c64936',
+          '#f2877a'
           ]
 df['color'] = colors
 #df['hatch'] = [None, None, '/', '/']
 out_png = '/home/server/student/homes/shooper/stem_ch1_figures/stem_vs_bdt_plot_color.png'
-xlabels = [s.strip() for s in 'Average OOB, Accuracy, Kappa, 1 - Quantity\ndisagreement, 1 - Allocation\ndisagreement'.split(', ')]
+xlabels = [s.strip() for s in 'Average OOB, Accuracy, Kappa, 1 - RMSE'.split(', ')]
 plot_per_row(df, out_png, index_col='model', xlabels=xlabels, title=None, ylim=[.6, 1])
 
 

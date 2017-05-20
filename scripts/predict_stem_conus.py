@@ -221,14 +221,10 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         ''' 
          Read the mean or vote back in '''
         if 'vote' in agg_stats:
-            vote_path = os.path.join(out_dir, '%s_vote.tif')
+            vote_path = os.path.join(out_dir, '%s_vote.tif' % file_stamp)
             ar_vote = gdal.Open(vote_path)
-
-        
-            vote_dir = os.path.join(model_dir, 'evaluation_vote')
-            mean_dir = os.path.join(model_dir, 'evaluation_mean')
-            
             print '\nComputing confusion matrix for vote...'
+            vote_dir = os.path.join(model_dir, 'evaluation_vote')
             out_txt = os.path.join(vote_dir, 'confusion.txt')
             df_v = confusion.main(confusion_params, ar_vote, out_txt, match=True)
             vote_acc = df_v.ix['producer', 'user']
@@ -241,9 +237,10 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
 
                 
         if 'mean' in agg_stats:
-            mean_path = os.path.join(out_dir, '%s_mean.tif')
+            mean_path = os.path.join(out_dir, '%s_mean.tif' % file_stamp)
             ar_mean = gdal.Open(mean_path)
             print '\nGetting confusion matrix for mean...'
+            mean_dir = os.path.join(model_dir, 'evaluation_mean')
             out_txt = os.path.join(mean_dir, 'confusion.txt')
             df_m = confusion.main(confusion_params, ar_mean, out_txt, match=True)
             mean_acc = df_m.ix['user','producer']

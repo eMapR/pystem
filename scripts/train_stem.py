@@ -162,8 +162,8 @@ def main(params, pct_train=None, min_oob=0):
         df_sets.to_csv(set_txt, sep='\t')#'''
     
         #if 'inventory_txt' in locals() :
-        avg_oob = 77.0#round(np.mean(ar_oob[mask]), 1)
-        avg_cnt = 59#int(round(np.mean(ar_cnt[mask]), 0))
+        avg_oob = round(np.mean(ar_oob[mask]), 1)
+        avg_cnt = int(round(np.mean(ar_cnt[mask]), 0))
         if 'avg_oob' in inv_columns: df_inv.ix[stamp, 'avg_oob'] = avg_oob
         if 'avg_count' in inv_columns: df_inv.ix[stamp, 'avg_count'] = avg_cnt
         if len(df_inv) > 1:

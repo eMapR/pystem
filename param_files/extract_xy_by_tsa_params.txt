@@ -16,8 +16,8 @@ mse	continuous	-1	*_mse_split.bsq	/vol/v1/scenes	1
 
 tsa_mosaic; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
 tsa_txt; /vol/v2/stem/stem-git/param_files/tsa_orwaca.txt
-xy_txt; /vol/v2/stem/landcover/samples/nlcd2001_sample80000_20170124_1445/nlcd2001_sample80000_20170124_1445.txt
-out_dir;  /vol/v2/stem/landcover/samples/nlcd2001_sample80000_20170124_1445
+xy_txt; /vol/v2/stem/landcover/samples/nlcd2001_sample1000000_20170131_1547/nlcd2001_sample1000000_20170131_1547.txt
+out_dir;  /vol/v2/stem/landcover/samples/nlcd2001_sample1000000_20170131_1547
 years; 2001
 
 Optional Parameters

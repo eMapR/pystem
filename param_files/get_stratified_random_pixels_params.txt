@@ -2,10 +2,12 @@ raster_path; /vol/v2/stem/landcover/truth_map/nlcd2001_CAORWA_3x3equal.tif
 col_name; landcover
 data_band; 1
 nodata; 255
-n_samples; 100000
+n_samples; 1250000
 bins; 10:11, 11:12, 20:21, 21:22, 22:23, 23:24, 30:31, 40:41, 41:42, 42:43, 51:52, 70:71, 80:81, 81:82, 89:90, 94:95
 pct_train; 0.8
-out_txt; /vol/v2/stem/landcover/samples/nlcd2001_sample.txt
+out_txt; /vol/v2/stem/conus_testing/samples/nlcd2001_conus_sample.txt
+min_samples; 100
 
 Optional parameters
 data_type; classified
+n_tiles; 1, 1

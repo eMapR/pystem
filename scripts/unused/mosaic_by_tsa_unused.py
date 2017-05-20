@@ -285,3 +285,117 @@ def extract_kernel(ds, data_band, ar_coords, transform, xsize, ysize, nodata=0):
     else: ar = ds.GetRasterBand(data_band).ReadAsArray(xoffset, yoffset, cols, rows) 
     
     return ar, (xoffset, yoffset)
+
+def kernel_from_shp(mosaic_lyr, coords, mosaic_tx, nodata, val_field='id'):
+    
+    # Get rid of the annoying warning about spatial refs when rasterizing
+    #gdal.PushErrorHandler('CPLQuietErrorHandler')
+    
+    ul_x, x_res, _, ul_y, _, y_res = mosaic_tx
+
+    #set_wkt = 'POLYGON (({0} {1}, {2} {3}, {4} {5}, {6} {7}))'.format(coords.ul_x,coords.ul_y, coords.lr_x, coords.ul_y, coords.lr_x, coords.lr_y, coords.ul_x, coords.lr_y)
+    support_set = Polygon([[coords.ul_x, coords.ul_y], 
+                                           [coords.lr_x, coords.ul_y],
+                                           [coords.lr_x, coords.lr_y],
+                                           [coords.ul_x, coords.lr_y]
+                                           ])
+    #support_set = wkt.loads(set_wkt)
+    #support_set = ogr.CreateGeometryFromWkt(set_wkt)
+    #support_set.CloseRings()
+    
+    ''' figure out a better way to compute intersection than looping though'''
+    #intersection = ogr.Geometry(ogr.wkbMultiPolygon)
+    
+    # Create the raster datasource and the intersection layer in memory
+    srs = mosaic_lyr.GetSpatialRef()
+    mem_driver = ogr.GetDriverByName('Memory')
+    shp_driver = ogr.GetDriverByName('Esri Shapefile')
+    ds_set = mem_driver.CreateDataSource('mem')
+    ds_inter = mem_driver.CreateDataSource('inter')
+    intersection_lyr = ds_inter.CreateLayer('intersection', None, ogr.wkbPolygon)
+    '''set_lyr = ds_set.CreateLayer('set', srs, ogr.wkbPolygon)
+    #tile_lyr = ds_mem.CreateLayer('tile', srs, ogr.wkbPolygon)
+    lyr_def = mosaic_lyr.GetLayerDefn()
+    set_feature = ogr.Feature(lyr_def)
+    set_feature.SetGeometry(support_set)
+    set_lyr.CreateFeature(set_feature.Clone())
+    mosaic_lyr.Intersection(set_lyr, intersection_lyr)'''
+    
+    #out_shp = shp_driver.CreateDataSource('/vol/v2/stem/conus_testing/models/landcover_20170419_1443/intersection_delete.shp')
+    #out_lyr = out_shp.CreateLayer('intersection_delete', mosaic_lyr.GetSpatialRef(), ogr.wkbMultiPolygon)
+    
+    lyr_def = mosaic_lyr.GetLayerDefn()
+    for i in range(lyr_def.GetFieldCount()):
+        field_def = lyr_def.GetFieldDefn(i)
+        intersection_lyr.CreateField(field_def)
+        #out_lyr.CreateField(field_def)
+    #for i in range(mosaic_lyr.GetFeatureCount()):
+    for feature in mosaic_lyr:
+        #feature = mosaic_lyr.GetFeature(i)
+        #geometry = feature.GetGeometryRef()
+        geometry = WKT.loads(feature.GetGeometryRef().ExportToWkt())
+        print geometry.is_valid
+        #geometry.CloseRings()
+        '''if geometry.Intersects(support_set):
+            this_intersection = ogr.Geometry(ogr.wkbMultiPolygon)
+            for i in range(geometry.GetGeometryCount()):
+                g = geometry.GetGeometryRef(i)
+                if g.Intersects(support_set):
+                    intersected_geom = g.Intersection(support_set)
+                    #import pdb; pdb.set_trace()
+                    try:
+                        this_intersection.AddGeometry(intersected_geom)
+                    except:
+                        import pdb; pdb.set_trace()#'''
+        if geometry.intersects(support_set):
+            #intersected_geom = geometry.Intersection(geometry)
+            intersected_wkt = geometry.intersection(support_set).wkt
+            intersected_geom = ogr.CreateGeometryFromWkt(intersected_wkt)
+            intersected_feature = ogr.Feature(lyr_def)
+            intersected_feature.SetGeometry(intersected_geom)
+            #import pdb; pdb.set_trace()
+            for i in range(lyr_def.GetFieldCount()):
+                name = lyr_def.GetFieldDefn(i).GetName()
+                val = feature.GetField(i)
+                intersected_feature.SetField(name, val)
+            #out_lyr.CreateFeature(intersected_feature.Clone())
+            intersection_lyr.CreateFeature(intersected_feature.Clone())
+            feature.Destroy()
+            intersected_feature.Destroy()
+    #out_shp.Destroy()#"""
+    
+    
+    #Get number of rows and cols of the output array and the input layer
+    x1, x2, y1, y2 = support_set.GetEnvelope()
+    cols = abs(int((x2 - x1)/x_res))
+    rows = abs(int((y2 - y1)/y_res))
+    
+    m_xmin, m_xmax, m_ymin, m_ymax = mosaic_lyr.GetExtent()
+    xsize = abs(int((m_xmax - m_xmin)/x_res))
+    ysize = abs(int((m_ymax - m_ymin)/y_res))
+    
+    tx = x1, x_res, 0, y2, 0, y_res #Assumes x > to the east, y > north
+    offset = calc_offset((m_xmin, m_ymax), tx)
+    
+    ''' Figuer out how to burn nodata values directly with Rasterize() rather than with mask'''
+    ras_driver = gdal.GetDriverByName('MEM')
+    ds_ras = ras_driver.Create('', cols, rows, 1, gdal.GDT_Int16)
+    ds_mask = ras_driver.Create('', cols, rows, 1, gdal.GDT_Byte)
+    ds_ras.SetGeoTransform(tx)
+    ds_mask.SetGeoTransform(tx)
+    gdal.RasterizeLayer(ds_ras, [1], intersection_lyr, options=["ATTRIBUTE=%s" % val_field])
+    gdal.RasterizeLayer(ds_mask, [1], intersection_lyr, burn_values=[1])
+    ar = ds_ras.ReadAsArray()
+    mask = ds_mask.ReadAsArray()
+    import pdb; pdb.set_trace()
+    mask = mask.astype(bool)
+    ar[~mask] = nodata
+    ds_ras = None
+    ds_mask = None
+    ds_mem.Destroy()
+
+    _, array_inds = get_offset_array_indices((ysize, xsize), (rows, cols), offset)
+    ul_row, ar_row_lr, ar_col_ul, ar_col_lr = array_inds
+    offset = array_inds[2], array_inds[0]
+
+    return ar, offset

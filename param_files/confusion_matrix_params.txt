@@ -1,14 +1,12 @@
 Parameters for confusion_matrix.py
 
-p_path; /vol/v2/stem/landcover/models/landcover_20170124_1641/landcover_20170124_1641_vote.bsq
+p_path; /vol/v2/stem/conus_testing/models/landcover_20170516_1559/landcover_20170516_1559_vote.tif
 t_path; /vol/v2/stem/landcover/truth_map/nlcd2001_CAORWA.tif
-sample_txt; /vol/v2/stem/landcover/samples/nlcd2001_sample80000_20170124_1445/nlcd2001_sample80000_20170124_1445_test.txt
+sample_txt; /vol/v2/stem/conus_testing/samples/nlcd2001_conus_sample999988_20170509_1259/nlcd2001_conus_sample999988_20170509_1259_test.txt
 target_col; landcover
 bins; 10:11, 11:12, 20:21, 21:22, 22:23, 23:24, 30:31, 40:41, 41:42, 42:43, 51:52, 70:71, 80:81, 81:82, 89:90, 94:95
 p_nodata; 255
 t_nodata; 255
 
 Optional parameters
-match; True
-target_col; landcover
-out_txt; /vol/v2/stem/landcover/models/landcover_20170124_1641/evaluation/confusion.txt
+out_txt; /vol/v2/stem/conus_testing/models/landcover_20170516_1559/evaluation_vote/confusion.txt

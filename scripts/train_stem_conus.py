@@ -52,7 +52,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         import pdb; pdb.set_trace()
         raise NameError(msg)
         
-    # Make a timestamped output directory if outdir not specified
+    '''# Make a timestamped output directory if outdir not specified
     now = datetime.now()
     date_str = str(now.date()).replace('-','')
     time_str = str(now.time()).replace(':','')[:4]
@@ -67,7 +67,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     
     # If there are variables that should remain constant across the modeling
     #   region, get the names
-    if 'constant_vars' in locals():
+    '''if 'constant_vars' in locals():
         constant_vars = sorted([i.strip() for i in constant_vars.split(',')])
         predict_cols += constant_vars
     
@@ -129,30 +129,12 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     with open(oob_pkl, 'rb') as f:
         oob_dict = pickle.load(f)
     #predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_bright','delta_green','delta_nbr','delta_wet', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
-
-    # Record params in inventory text file
-    if 'inventory_txt' in inputs or make_oob_map:
-        t1 = time.time()
-        print 'Getting model info...\n'
-        df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
-        n_sets = len(df_sets)
-        '''if 'sample' in sample_txt:
-            n_samples = int(sample_txt.split('_')[1].replace('sample',''))
-        inv_columns = df_inv.columns
-        if 'n_sets' in inv_columns: df_inv.ix[stamp, 'n_sets'] = n_sets
-        if 'n_samples' in inv_columns: df_inv.ix[stamp, 'n_samples'] = n_samples
-        if 'support_size' in inv_columns: df_inv.ix[stamp, 'support_size'] = str(support_size)
-        if 'sets_per_cell' in inv_columns: df_inv.ix[stamp, 'sets_per_cell'] = sets_per_cell
-        if 'max_features' in inv_columns: df_inv.ix[stamp, 'max_features'] = max_features
-        info_dir = os.path.dirname(inventory_txt)
-        existing_models = fnmatch.filter(os.listdir(info_dir), '%s*' % target_col)
-        if len(existing_models) > 0:
-            df_inv = df_inv[df_inv.index.isin(existing_models)]#'''
-        
+    if make_oob_map:
         # Check if oob_map params were specified. If not, set to defaults
         if 'n_tiles' not in locals():
-            print 'n_tiles not specified. Using default: 25 x 15 ...\n'
-            n_tiles = 5, 3
+            n_tiles = 15, 10
+            print 'n_tiles not specified. Using default: %s x %s ...\n' % (n_tiles)
+            
         else:
             n_tiles = int(n_tiles[0]), int(n_tiles[1])
             
@@ -187,21 +169,41 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
                                      predict_cols, out_dir,
                                      stamp, prj, driver)
         df_sets.to_csv(set_txt, sep='\t')#'''
-    
-        #if 'inventory_txt' in locals() :
+
         avg_oob = round(avg_dict['oob'], 1)
         avg_cnt = int(round(avg_dict['count'], 0))
-        if 'avg_oob' in inv_columns: df_inv.ix[stamp, 'avg_oob'] = avg_oob
-        if 'avg_count' in inv_columns: df_inv.ix[stamp, 'avg_count'] = avg_cnt
-        if len(df_inv) > 1:
-            df_inv.to_csv(inventory_txt, sep='\t')
-        else:
-            print 'WARNING: Model info not written to inventory_txt...\n' #'''
         
         print '\nAverage OOB score: .................... %.1f' % avg_oob
         print '\nAverage number of overlapping sets: ... %s\n' % avg_cnt
         
         print 'Time to make OOB score map: %.1f hours\n' % ((time.time() - t1)/3600)
+    
+    # Record params in inventory text file
+    if 'inventory_txt' in inputs:
+        t1 = time.time()
+        print 'Getting model info...\n'
+        df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
+        n_sets = len(df_sets)
+        '''if 'sample' in sample_txt:
+            n_samples = int(sample_txt.split('_')[1].replace('sample',''))
+        inv_columns = df_inv.columns
+        if 'n_sets' in inv_columns: df_inv.ix[stamp, 'n_sets'] = n_sets
+        if 'n_samples' in inv_columns: df_inv.ix[stamp, 'n_samples'] = n_samples
+        if 'support_size' in inv_columns: df_inv.ix[stamp, 'support_size'] = str(support_size)
+        if 'sets_per_cell' in inv_columns: df_inv.ix[stamp, 'sets_per_cell'] = sets_per_cell
+        if 'max_features' in inv_columns: df_inv.ix[stamp, 'max_features'] = max_features
+        info_dir = os.path.dirname(inventory_txt)
+        existing_models = fnmatch.filter(os.listdir(info_dir), '%s*' % target_col)
+        if len(existing_models) > 0:
+            df_inv = df_inv[df_inv.index.isin(existing_models)]#'''
+
+
+        if 'avg_oob' in inv_columns and make_oob_map: df_inv.ix[stamp, 'avg_oob'] = avg_oob
+        if 'avg_count' in inv_columns and make_oob_map: df_inv.ix[stamp, 'avg_count'] = avg_cnt
+        if len(df_inv) > 1:
+            df_inv.to_csv(inventory_txt, sep='\t')
+        else:
+            print 'WARNING: Model info not written to inventory_txt...\n' #'''   
         
     
     print 'Total training time: %.1f minutes' % ((time.time() - t0)/60)

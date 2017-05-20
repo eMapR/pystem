@@ -1,15 +1,14 @@
 Parameters for filter_raster.py
 
-path; /vol/v1/proj/lst/outputs/models/randomforest/rfprediction_mosaic/yearly/lst_run1_prediction_voting_lulc_RF_mosaic_2003.bsq
+path; /vol/v1/general_files/datasets/spatial_data/nlcd/nlcd_2001_v2/nlcd_2001_landcover_clipped_to_conus_tiles.tif
 databand; 1
-function; area
-kernel_size; 10
-out_path; /vol/v2/stem/ebird/predictors/pctconiferous_150m/pctconiferous_150m_2003.bsq
+function; is_equal
+kernel_size; 3
+out_path; /vol/v1/general_files/datasets/spatial_data/nlcd/nlcd_2001_v2/nlcd_2001_landcover_3x3_equal.tif
 
 Optional parameters
-n_tiles; 20, 12
-n_jobs; 20
-kernel_type; circle
+n_tiles; 80, 35
+n_jobs; 30
+kernel_type; square
 nodata; 0
 out_nodata; 255
-filter_value; 42

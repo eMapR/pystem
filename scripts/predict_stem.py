@@ -58,6 +58,7 @@ def main(params, inventory_txt=None, constant_vars=None):
     pred_vars  = sorted(df_var.index)
     # Make sure vars are sorted alphabetically since they were for training
     df_var = df_var.reindex(pred_vars)
+    
     # If constants were given, make a dict and make sure they match the training
     #  constants
     if 'constant_vars' in inputs:
@@ -174,7 +175,7 @@ def main(params, inventory_txt=None, constant_vars=None):
     #df_sets.to_csv(set_txt, sep='\t')'''
     mosaic_ds = None
     
-    '''# Save the importance values
+    # Save the importance values
     importance = pd.DataFrame({'variable': pred_vars,
                                'pct_importance': pct_importance,
                                'index': range(len(pred_vars))
@@ -197,7 +198,7 @@ def main(params, inventory_txt=None, constant_vars=None):
         vote_dir = os.path.join(model_dir, 'evaluation_vote')
         mean_dir = os.path.join(model_dir, 'evaluation_mean')
         
-        '''print '\nComputing confusion matrix for vote...'
+        print '\nComputing confusion matrix for vote...'
         out_txt = os.path.join(vote_dir, 'confusion.txt')
         print confusion_params
         df_v = confusion.main(confusion_params, ar_vote, out_txt, match=True)
@@ -205,12 +206,12 @@ def main(params, inventory_txt=None, constant_vars=None):
             out_txt = os.path.join(vote_dir, 'confusion_avg_kernel.txt')
             df_v_off = confusion.main(confusion_params, ar_vote, out_txt)
         except Exception as e:
-            print e'''
+            print e
         
-        print '\nGetting confusion matrix for mean...'
+        '''print '\nGetting confusion matrix for mean...'
         out_txt = os.path.join(mean_dir, 'confusion.txt')
         df_m = confusion.main(confusion_params, ar_mean, out_txt, match=True)
-        '''try:
+        try:
             out_txt = os.path.join(mean_dir, 'confusion_avg_kernel.txt')
             df_m_off = confusion.main(confusion_params, ar_mean, out_txt)
         except Exception as e:

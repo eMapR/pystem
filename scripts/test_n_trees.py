@@ -18,7 +18,7 @@ def test(out_dir, x_train, y_train, max_trees, step):
 
     print 'Testing OOB error rate per number of trees...'
     oob_errors = []
-    n_trees = range(1, max_trees + 1, step)
+    n_trees = range(50, max_trees + 1, step)
     n_tests = max_trees / step
 
     for i, n in enumerate(n_trees):

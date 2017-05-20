@@ -24,7 +24,8 @@ def write_params(params_path, param_dict):
     lines.append('out_txt; %s\n' % param_dict['out_txt'])
     lines.append('match; %s\n' % param_dict['match'])
     #if param_dict['inventory_txt']:
-    lines.append('inventory_txt; %s\n' % param_dict['inventory_txt'])
+    if param_dict['inventory_txt']:
+        lines.append('inventory_txt; %s\n' % param_dict['inventory_txt'])
     lines.append('file_stamp; %s\n' % param_dict['file_stamp'])
         
     with open(params_path, 'w') as f:

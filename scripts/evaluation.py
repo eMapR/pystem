@@ -495,7 +495,10 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
         # Find the pixel in each kernel with the lowest difference
         # Subtract sampled prediction value from each pixel in the kernel
         dif = np.abs(np.apply_along_axis(lambda x: x - p_samples, axis=0, arr=t_kernel))
-        dif[np.isnan(dif)] = np.nanmax(dif) + 1#can't keep as nan because some rows could be all nan so nanargmin() will raise an error
+        try:
+            dif[np.isnan(dif)] = np.nanmax(dif) + 1#can't keep as nan because some rows could be all nan so nanargmin() will raise an error
+        except:
+            import pdb; pdb.set_trace()
         pxl_ind = np.argmin(dif, axis=1)
         t_samples = t_kernel[xrange(n_samples), pxl_ind] #Rather than xrange, maybe use :
         sample_mask = ~np.isnan(t_samples)

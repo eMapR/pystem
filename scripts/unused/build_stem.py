@@ -541,3 +541,50 @@ gsrd.plot_sets_on_shp(coords, 900, sets[20][1], (400000, 300000), df_tiles.ix[se
 #    print 'Number of sets: ', len(s)
 #    coords, extent = gsrd.get_coords(shp)
 #    gsrd.plot_sets_on_shp(coords, 500, s, support_size)
+
+
+''' To make making tsa_ars optional in predict_stem 4/19/17'''
+    # Check if any of the variables need to be mosaicked
+    if np.any(df_var.by_tsa):
+        mosaic_predictors = True
+    
+    t0 = time.time()
+    if 'n_jobs' in inputs:
+
+        # Predict in parallel
+        n_jobs = int(n_jobs)
+        args = []
+        t1 = time.time()
+        print 'Predicting in parallel with %s jobs...' % n_jobs
+        print 'Building args and making rasters of TSA arrays...'
+        for c, (set_id, row) in enumerate(df_sets.iterrows()):
+            
+            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
+            
+            # Save rasters of tsa arrays ahead of time to avoid needing to pickle or fork mosaic
+            if mosaic_predictors:
+                if mosaic_path.endswith('.shp'):
+                    tsa_ar, tsa_off = mosaic.kernel_from_shp(mosaic_ds, coords, mosaic_tx, nodata)
+                else:
+                    tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords,
+                                                            mosaic_tx, xsize, ysize,
+                                                            nodata=nodata)
+                set_mosaic_path = os.path.join(predict_dir, 'tsa_%s.bsq' % set_id)
+                tx_out = row.ul_x, mosaic_tx[1], mosaic_tx[2], row.ul_y, mosaic_tx[4], mosaic_tx[5]
+                np_dtype = get_min_numpy_dtype(tsa_ar)
+                gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
+                mosaic.array_to_raster(tsa_ar, tx_out, prj, driver, set_mosaic_path, gdal_dtype, silent=True)
+                tsa_off = stem_conus.calc_offset((mosaic_tx[0], mosaic_tx[3]), (tx_out[0], tx_out[3]), tx_out)
+            
+            else:
+                set_mosaic_path = None
+                tsa_ar = None
+                tsa_off = None
+            
+            # Build list of args to pass to the Pool
+            args.append([c, total_sets, set_id, df_var, set_mosaic_path, tsa_off, coords, 
+                         mosaic_tx, xsize, ysize, row.dt_file, nodata, np.uint8, 
+                         constant_vars, predict_dir])
+        print '%.1f minutes\n' % ((time.time() - t1)/60)
+        p = Pool(n_jobs)
+        p.map(stem_conus.par_predict, args, 1)

@@ -4,15 +4,18 @@ Created on Thu Dec  1 10:10:19 2016
 
 @author: shooper
 """
-
+import os
 import sys
 import gdal
 import time
+import docopt
 import numpy as np
+
 from mosaic_by_tsa import get_offset_array_indices, calc_offset, array_to_raster
+from lthacks import createMetadata
 
 
-def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None):
+def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None, mask_val=None, overwrite=False):
     
     t0 = time.time()
     in_nodata = int(in_nodata)
@@ -41,15 +44,30 @@ def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None):
     ar = np.full(ar_snap.shape, out_nodata, dtype=np_dtype)
     ar_in[ar_in == in_nodata] = out_nodata
     ar[snap_inds[0]:snap_inds[1], snap_inds[2]:snap_inds[3]] = ar_in[in_inds[0]:in_inds[1], in_inds[2]:in_inds[3]]
+    
+    if mask_val:
+        mask_val = int(mask_val)
+        ar[ar_snap == mask_val] = out_nodata
+    
     print '%.1f seconds\n' % (time.time() - t1)
     
-    if ar.max() <= 255 and ar.min() >= 0:
-        gdal_dtype = gdal.GDT_Byte
+    if out_path:
+        if ar.max() <= 255 and ar.min() >= 0:
+            gdal_dtype = gdal.GDT_Byte
+        else:
+            gdal_dtype = gdal.GDT_Int16
+        
+        if os.path.exists(out_path) and not overwrite: 
+            sys.exit('out_path already exists')
+        array_to_raster(ar, tx_snap, prj, driver, out_path, gdal_dtype, out_nodata)
+        
+        # Write metadata
+        desc = ('Input raster %s snapped to the extent of %s.') % (in_raster, snap_raster)
+        if mask_val:
+            desc += ' Data were masked from snap raster with value %s.' % mask_val
+        createMetadata(sys.argv, out_path, description=desc)
     else:
-        gdal_dtype = gdal.GDT_UInt16
-    
-    if not out_path: out_path = in_raster
-    array_to_raster(ar, tx_snap, prj, driver, out_path, gdal_dtype, out_nodata)
+        return ar
     
     print '\nTotal time to snap raster: %.1f seconds\n' % (time.time() - t0)
 
@@ -57,3 +75,4 @@ def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None):
 if __name__ == '__main__':
     
     sys.exit(main(*sys.argv[1:]))
+    

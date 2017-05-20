@@ -89,8 +89,8 @@ def main(params, inventory_txt=None):
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     total_sets = len(df_sets)
     
-    # Loop through each set and generate predictions
-    '''t0 = time.time()
+    '''# Loop through each set and generate predictions
+    t0 = time.time()
     for c, (set_id, row) in enumerate(df_sets.iterrows()):
         t1 = time.time()
         with open(row.dt_file, 'rb') as f: 
@@ -108,7 +108,7 @@ def main(params, inventory_txt=None):
     print '\nTotal time for predicting: %.1f hours\n' % ((time.time() - t0)/3600)#'''
     
     #Aggregate predictions by tile and stitch them back together
-    '''if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
+    if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
     ar_mean, ar_vote, pct_importance, df_sets = stem.aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size, predict_dir, df_sets, out_dir, file_stamp, prj, driver, 0)
     #df_sets.to_csv(set_txt, sep='\t')'''
     mosaic_ds = None

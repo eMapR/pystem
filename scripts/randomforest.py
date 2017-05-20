@@ -12,6 +12,7 @@ from sklearn import ensemble
 from sklearn import metrics
 from matplotlib import pyplot as plt
 
+import stem
 
 def read_params(txt):
     '''
@@ -317,7 +318,7 @@ def save_rfmodel(rf, filename):
     ''' Write a RandomForest model to disk'''
 
     with open(filename, 'w+') as f:
-        pickle.dump(rf, f)
+        pickle.dump(rf, f, protocol=-1)
 
     return filename
 
@@ -412,7 +413,10 @@ def get_predictors(df_var, nodata, ydims=None, constant_vars=None):
 
     print 'Finished getting arrays: %.1f minutes' % ((time.time() - t0)/60)
     return ar, nodata_mask
-    
+
+def par_predict_from_dt(args):
+    dt, predictors = args
+    return dt.predict(predictors)
 
 def array_to_raster(array, tx, prj, driver, out_path, dtype, nodata=None):
     ''' Save a numpy array as a new raster '''

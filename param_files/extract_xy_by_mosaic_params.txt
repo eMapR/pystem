@@ -1,0 +1,23 @@
+var_name	data_type	data_band	search_str	basepath	by_tile	nodata	path_filter
+elevation	continuous	1	*ned_dem_ee_conus_20170501_elevation.bsq	/vol/v2/conus_tiles/tiles_topo	1
+slope	continuo	us	1	*ned_dem_ee_conus_20170501_slope.bsq	/vol/v2/conus_tiles/tiles_topo	1
+aspectNESW	continuous	1	*ned_dem_ee_conus_20170501_aspect_nesw.bsq	/vol/v2/conus_tiles/tiles_topo	1
+aspectNWSE	continuous	1	*ned_dem_ee_conus_20170501_aspect_nwse.bsq	/vol/v2/conus_tiles/tiles_topo	1
+greenness	continuous	-1	*lt_ee_conus_nbr_20170417_ftv_tcg.bsq	/vol/v2/conus_tiles/tiles_seg	1
+brightness	continuous	-1	*lt_ee_conus_nbr_20170417_ftv_tcb.bsq	/vol/v2/conus_tiles/tiles_seg	1
+wetness	continuous	-1	*lt_ee_conus_nbr_20170417_ftv_tcw.bsq	/vol/v2/conus_tiles/tiles_seg	1
+nbr	continuous	-1	*lt_ee_conus_nbr_20170417_ftv_nbr.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_greenness	continuous	-1	*lt_ee_conus_nbr_20170417_delta_tcg.bsq	/vol/v2/conus_tiles/tiles_seg	1
+detla_brightness	continuous	-1	*lt_ee_conus_nbr_20170417_delta_tcb.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_wetness	continuous	-1	*lt_ee_conus_nbr_20170417_delta_tcw.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_nbr	continuous	-1	*lt_ee_conus_nbr_20170417_delta_nbr.bsq	/vol/v2/conus_tiles/tiles_seg	1
+time_since	continuous	-1	*lt_ee_conus_nbr_20170417_time_since.bsq	/vol/v2/conus_tiles/tiles_seg	1
+
+mosaic_path; /vol/v2/stem/conus_testing/extent_shps/tiles_caorwa.shp
+xy_txt; /vol/v2/stem/conus_testing/samples/nlcd2001_conus_sample999988_20170509_1259/nlcd2001_conus_sample999988_20170509_1259.txt
+years; 2001
+out_dir; /vol/v2/stem/conus_testing/samples/nlcd2001_conus_sample999988_20170516_0917
+
+Optional Parameters
+tile_id_field; name
+kernel; True

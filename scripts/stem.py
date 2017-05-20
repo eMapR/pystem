@@ -553,13 +553,13 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
             paths.extend(these_paths)
     else:
         paths = glob.glob(os.path.join(basepath, search_str))
-        
+
     # If path filter is specified, remove any paths that contain it
     if not path_filter == '':
         [paths.remove(p) for p in paths if fnmatch.fnmatch(p, path_filter)]
         #paths = [p for p in paths if fnmatch.fnmatch(p, path_filter)]
     
-    '''if len(paths) > 1:
+    if len(paths) > 1:
         print 'Multiple files found for tsa: ' + tsa_str
         for p in paths:
             print p
@@ -567,7 +567,6 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
     
     #import pdb; pdb.set_trace()
     if len(paths) < 1:
-        #pdb.set_trace()
         sys.exit(('No files found for tsa {0} with basepath {1} and ' +\
         'search_str {2}\n').format(tsa_str, basepath, search_str))
     
@@ -812,6 +811,7 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, nodata_mask, out
     for ind, var in enumerate(df_var.index):
         #this_tsa_ar = np.copy(tsa_ar)
         data_band, search_str, basepath, by_tsa, path_filter = df_var.ix[var]
+        path_filter=''
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
         
         if by_tsa:
@@ -822,9 +822,10 @@ def get_predictors(df_var, mosaic_tx, tsa_strs, tsa_ar, coords, nodata_mask, out
             #this_file = find_file(basepath, search_str, path_filter=path_filter)
             #tx_, ar_var, roff_, coff_ = mosaic.get_array(this_file, data_band, coords)
             try:
-                this_file = find_file(basepath, search_str, path_filter=path_filter)
+                this_file = find_file(basepath, search_str, path_filter='')
                 tx_, ar_var, roff_, coff_ = mosaic.get_array(this_file, data_band, coords)
             except:
+                print traceback.print_exception(*sys.exc_info())
                 import pdb; pdb.set_trace()
         ar_var[nodata_mask] = out_nodata
         predictors.append(ar_var.ravel())
@@ -1271,59 +1272,6 @@ def pct_vote(ar, ar_vote, ar_count):
     ar_pct = np.round(ar_sum/ar_count.astype(np.float16) * 100).astype(np.uint8)
     
     return ar_pct
-    
-
-def get_nonforest_mask(lc_path, ag_path, lc_vals, ag_vals):
-    '''
-    Create a boolean mask where lc_path==lc_vals or ag_path==ag_vals.
-    '''
-    # Read in the datasets as arrays
-    ds_lc = gdal.Open(lc_path)
-    tx_lc = ds_lc.GetGeoTransform()
-    ar_lc = ds_lc.GetRasterBand(1).ReadAsArray()
-    ds_lc = None
-    
-    ds_ag = gdal.Open(ag_path)
-    tx_ag = ds_ag.GetGeoTransform()
-    ar_ag = ds_ag.ReadAsArray()
-    ds_ag = None   
-    
-    # Calc offsets
-    offset = calc_offset((tx_lc[0], tx_lc[1]), (tx_ag[0], tx_ag[1]), tx_ag)
-    lc_inds, ag_inds = mosaic.get_offset_array_indices(ar_lc.shape, ar_ag.shape, offset)
-    
-    # In case these were read from a text file, integerize them
-    try:
-        lc_vals = np.array([int(v) for v in lc_vals.split(',')])
-        ag_vals = np.array([int(v) for v in ag_vals.split(',')])
-    except:
-        pass
-    
-    # Get masks and combine them
-    #lc_mask = np.in1d(ar_lc[lc_inds[0]:lc_inds[1], lc_inds[2]:lc_inds[3]], lc_vals)
-    mask = np.in1d(ar_lc.ravel(), lc_vals).reshape(ar_lc.shape)
-    lc_view = mask[lc_inds[0]:lc_inds[1], lc_inds[2]:lc_inds[3]]
-    ag_mask = np.in1d(ar_ag[ag_inds[0]:ag_inds[1], ag_inds[2]:ag_inds[3]], ag_vals)
-    ag_shape = ag_inds[1] - ag_inds[0], ag_inds[3] - ag_inds[2]
-    mask[lc_inds[0]:lc_inds[1], lc_inds[2]:lc_inds[3]] = np.logical_or(lc_view, ag_mask.reshape(ag_shape))
-    
-    del ar_lc, ar_ag, ag_mask
-    
-    return mask, tx_lc
-
-
-def mask_array(ar, mask, tx_ar, tx_mask, mask_val=0):
-    '''
-    Set ar == mask_val where mask is true
-    '''
-    
-    ar_ul = tx_ar[0], tx_ar[3]
-    mask_ul = tx_mask[0], tx_mask[3]
-    offset = calc_offset(ar_ul, mask_ul, tx_ar)
-    
-    a_inds, m_inds = mosaic.get_offset_array_indices(ar.shape, mask.shape, offset)
-    view = ar[a_inds[0]:a_inds[1], a_inds[2]:a_inds[3]]
-    view[mask[m_inds[0]:m_inds[1], m_inds[2]:m_inds[3]]] = mask_val
 
 
 def par_mean(ar):
@@ -1352,329 +1300,6 @@ def par_wmean(args):
     return weighted_mean(ar, vote, c=c)
     #except:
         #traceback.print_exception(*sys.exc_info())
-    
-
-"""def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_tx, support_size, prediction_dir, df_sets, out_dir, file_stamp, prj, driver):
-    
-    t0 = time.time()
-    ar_mean = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_vote = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_stdv = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_coun = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_impr = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_wtmn_10 = np.full((ysize, xsize), nodata, dtype=np.int16)
-    ar_wtmn_20 = np.full((ysize, xsize), nodata, dtype=np.int16)#'''
-    
-    df_tiles, df_tiles_rc, tile_size = get_tiles(n_tiles, xsize, ysize, mosaic_tx)
-    total_tiles = n_tiles[0] * n_tiles[1]
-    
-    
-    for t_ind, t_row in df_tiles.ix[:1, :].iterrows():
-        t1 = time.time()
-        print 'Aggregating for %s of %s tiles' % (t_ind + 1, total_tiles)
-        
-        # Calculate the size of this tile in case it's at the edge where the
-        #   tile size will be slightly different
-        rc = df_tiles_rc.ix[t_ind]
-        this_size = rc.lr_r - rc.ul_r, rc.lr_c - rc.ul_c
-        
-        df_these_sets = get_overlapping_sets(df_sets, t_row, this_size, support_size)        
-        n_sets = len(df_these_sets)
-        set_ids = df_these_sets.index.tolist()
-        
-        # Load overlapping predictions from disk and read them as arrays
-        #files = [os.path.join(prediction_dir, 'prediction_%s.bsq' % set_id)  for set_id in set_ids]
-        #predictions = load_predictions(files)
-        tile_ul = t_row[['ul_x','ul_y']]
-        predictions = load_predictions(prediction_dir, df_these_sets, tile_ul, this_size)
-        
-        # If there are no overalpping sets for this tile, fill the tile with nodata
-        if n_sets == 0:
-            print 'No overlapping sets for this tile'
-            this_mean = np.full(this_size, nodata, dtype=np.int16)
-            this_vote = np.full(this_size, nodata, dtype=np.int16)
-            this_stdv = np.full(this_size, nodata, dtype=np.int16)
-            this_coun = np.full(this_size, nodata, dtype=np.int16)
-            this_impr = np.full(this_size, nodata, dtype=np.int16)
-            this_wtmn_10 = np.full(this_size, nodata, dtype=np.int16)
-            this_wtmn_20 = np.full(this_size, nodata, dtype=np.int16)
-        
-        # Otherwise, aggregate all overlapping sets for each pixel
-        else:
-            print n_sets, ' Overlapping sets'
-            t2 = time.time()
-            pred_bands = []
-            importance_bands = []
-            for s_ind, s_row in df_these_sets.iterrows():
-                s_row = df_these_sets.ix[s_ind]
-                
-                # Fill tile with prediction
-                ar_pred, tile_inds = predictions[s_ind]
-                pred_band = fill_tile_band(this_size, ar_pred, tile_inds, nodata)
-                pred_bands.append(pred_band)
-                
-                # Get feature with maximum importance and fill tile with that val
-                with open(s_row.dt_file, 'rb') as f: 
-                    dt_model = pickle.load(f)
-                max_importance = get_max_importance(dt_model)
-                ar_import = np.full(ar_pred.shape, max_import, dtype=np.int16)
-                import_band = fill_tile_band(this_size, ar_import, tile_inds, nodata)
-                importance_bands.append(import_band)
-            print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
-            
-            ar_tile = np.dstack(pred_bands)
-            nd_impr = np.dstack(importance_bands)
-            del pred_bands, importance_bands, ar_import
-            t3 = time.time()
-            n_workers = 40
-            p = Pool(n_workers)
-            chunksize = ar_tile.shape[0]/n_workers
-            this_mean = np.vstack(p.map(par_mean, ar_tile, chunksize))
-            this_vote = np.vstack(p.map(par_mode, ar_tile, chunksize))
-            this_stdv = np.vstack(p.map(par_stdv, ar_tile, chunksize))
-            this_coun = np.vstack(p.map(par_sum, ~np.isnan(ar_tile), chunksize))
-            this_impr = np.vstack(p.map(par_mode, nd_impr, chunksize))
-            this_wtmn_10 = np.vstack(p.map(par_wmean, [(a, v, 10) for a, v in zip(np.array_split(ar_tile, n_workers), np.array_split(this_vote, n_workers))], chunksize))
-            this_wtmn_20 = np.vstack(p.map(par_wmean, [(a, v, 20) for a, v in zip(np.array_split(ar_tile, n_workers), np.array_split(this_vote, n_workers))], chunksize))
-            p.close()
-            
-            print this_mean.shape
-            nans = np.isnan(this_mean)
-            this_mean[nans] = nodata
-            this_stdv[nans] = nodata
-            this_impr[nans] = nodata
-            this_vote[nans] = nodata
-            this_coun[nans] = nodata
-            this_wtmn_10[nans] = nodata
-            this_wtmn_20[nans] = nodata
-            
-            print 'Aggregating: %.1f minutes' % ((time.time() - t3)/60)
-        print 'Total aggregation time: %.1f minutes\n' % ((time.time() - t1)/60)    
-        
-        # Fill in the tile in the final arrays
-        ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[t_ind]
-        ar_mean[ul_r : lr_r, ul_c : lr_c] = this_mean.astype(np.int16)
-        ar_vote[ul_r : lr_r, ul_c : lr_c] = this_vote.astype(np.int16)
-        ar_stdv[ul_r : lr_r, ul_c : lr_c] = this_stdv.astype(np.int16)
-        ar_coun[ul_r : lr_r, ul_c : lr_c] = this_coun
-        ar_impr[ul_r : lr_r, ul_c : lr_c] = this_impr
-        ar_wtmn_10[ul_r : lr_r, ul_c : lr_c] = this_wtmn_10
-        ar_wtmn_20[ul_r : lr_r, ul_c : lr_c] = this_wtmn_20
-    
-    # Mask arrays
-    #mask, tx_mask = get_nonforest_mask(lc_path, ag_path, lc_vals, ag_vals)
-    #mask_array(ar_mean, mask, mosaic_tx, tx_mask)
-    #mask_array(ar_vote, mask, mosaic_tx, tx_mask)
-    
-    # Write final rasters to disk
-    out_path = os.path.join(out_dir, file_stamp + '_mean.bsq')
-    mosaic.array_to_raster(ar_mean, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = out_path.replace('mean', 'vote')
-    mosaic.array_to_raster(ar_vote, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)   
-    
-    out_path = out_path.replace('vote', 'stdv')
-    mosaic.array_to_raster(ar_stdv, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = out_path.replace('stdv', 'count')
-    mosaic.array_to_raster(ar_coun, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = out_path.replace('count', 'importance')
-    mosaic.array_to_raster(ar_impr, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)  
-    
-    out_path = os.path.join(out_dir, file_stamp + '_weightedmean_10.bsq')
-    mosaic.array_to_raster(ar_wtmn_10, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = os.path.join(out_dir, file_stamp + '_weightedmean_20.bsq')
-    mosaic.array_to_raster(ar_wtmn_20, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)#'''
-    
-    print '\nTotal aggregation run time: %.1f minutes' % ((time.time() - t0)/60)
-    #return predictions, df_sets, df_train
-    #return df_tiles, df_these_sets, ar_mean, ar_tile, ar_out
-    #return ar_out
-    del ar_mean, ar_coun, ar_impr, ar_pred, ar_stdv, ar_tile, ar_vote, ar_wtmn_10, ar_wtmn_20, this_coun, this_impr, this_mean, this_stdv, this_vote, this_wtmn_10, this_wtmn_20"""
-    
-"""def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size, prediction_dir, df_sets, out_dir, file_stamp, prj, driver, mosaic_nodata=0):
-    
-    t0 = time.time()
-    ar_mean = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_vote = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_stdv = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_coun = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_impr = np.full((ysize, xsize), nodata, dtype=np.int16)
-    #ar_wtmn_10 = np.full((ysize, xsize), nodata, dtype=np.int16)#'''
-    #ar_wtmn_20 = np.full((ysize, xsize), nodata, dtype=np.int16)
-    
-    #mosaic_ds = gdal.Open(mosaic_path)
-    mosaic_tx = mosaic_ds.GetGeoTransform()
-    df_tiles, df_tiles_rc, tile_size = get_tiles(n_tiles, xsize, ysize, mosaic_tx)
-    total_tiles = len(df_tiles)
-    df_tiles['tile'] = df_tiles.index
-    
-    # Find the tiles that have only nodata values
-    t1 = time.time()
-    print '\nFinding empty tiles...'
-    mask = mosaic_ds.ReadAsArray() != mosaic_nodata
-    empty_tiles = find_empty_tiles(df_tiles, mask, mosaic_tx)
-    mosaic_ds = None
-    mask = None
-    print '%s empty tiles found of %s total tiles\n%.1f minutes\n' %\
-    (len(empty_tiles), total_tiles, (time.time() - t1)/60)
-    # Select only tiles that are not empty
-    df_tiles = df_tiles.select(lambda x: x not in empty_tiles)
-    total_tiles = len(df_tiles)
-
-    # Get feature importances and max importance per set
-    '''t1 = time.time()
-    print 'Getting importance values...'
-    importance_list = []
-    df_sets['max_importance'] = nodata
-    for s, row in df_sets.iterrows():
-        with open(row.dt_file, 'rb') as f: 
-            dt_model = pickle.load(f)
-        max_importance, this_importance = get_max_importance(dt_model)
-        df_sets.ix[s, 'max_importance'] = max_importance
-        importance_list.append(this_importance)
-    importance = np.array(importance_list).mean(axis=0)
-    pct_import = importance / importance.sum()
-    print '%.1f minutes\n' % ((time.time() - t1)/60)#'''
-    
-    # For each tile, find overlapping sets and calc mode and/or mean for all 
-    #   overlapping sets
-    #del_dir = '/vol/v2/stem/imperv/models/delete/overlapping'
-    #out_txt = os.path.join(del_dir, 'overlapping_%s.txt')
-    for i, (t_ind, t_row) in enumerate(df_tiles.iterrows()):
-        t1 = time.time()
-        print 'Aggregating for %s of %s tiles' % (i + 1, total_tiles)
-        
-        # Calculate the size of this tile in case it's at the edge where the
-        #   tile size will be slightly different
-        this_size = abs(t_row.lr_y - t_row.ul_y), abs(t_row.lr_x - t_row.ul_x)
-        df_these_sets = get_overlapping_sets(df_sets, t_row, this_size, support_size)
-         
-        ''' delete '''
-        #df_these_sets.to_csv(out_txt % t_ind, sep='\t')
-        #continue
-        
-        rc = df_tiles_rc.ix[t_ind]
-        this_size = rc.lr_r - rc.ul_r, rc.lr_c - rc.ul_c
-        n_sets = len(df_these_sets)
-        
-        # Load overlapping predictions from disk and read them as arrays
-        tile_ul = t_row[['ul_x','ul_y']]
-        predictions = load_predictions(prediction_dir, df_these_sets, tile_ul, this_size)
-        
-        # If there are no overalpping sets for this tile, fill the tile with nodata
-        if t_ind in empty_tiles:
-            print 'No overlapping sets for this tile'
-            continue
-            this_mean = np.full(this_size, nodata, dtype=np.int16)
-            #this_vote = np.full(this_size, nodata, dtype=np.int16)
-            #this_stdv = np.full(this_size, nodata, dtype=np.int16)
-            #this_coun = np.full(this_size, nodata, dtype=np.int16)
-            #this_impr = np.full(this_size, nodata, dtype=np.int16)
-            #this_wtmn_10 = np.full(this_size, nodata, dtype=np.int16)
-            #this_wtmn_20 = np.full(this_size, nodata, dtype=np.int16)
-        
-        # Otherwise, aggregate all overlapping sets for each pixel
-        else:
-            print n_sets, ' Overlapping sets'
-            t2 = time.time()
-            pred_bands = []
-            importance_bands = []
-            for s_ind, s_row in df_these_sets.iterrows():
-                s_row = df_these_sets.ix[s_ind]
-                
-                # Fill tile with prediction
-                ar_pred, tile_inds = predictions[s_ind]
-                pred_band = fill_tile_band(this_size, ar_pred, tile_inds, nodata)
-                pred_bands.append(pred_band)
-                
-                # Get feature with maximum importance and fill tile with that val
-                '''try:
-                    with open(s_row.dt_file, 'rb') as f: 
-                        dt_model = pickle.load(f)
-                    #max_importance, importance = get_max_importance(dt_model)
-                    #importance_list.append(importance)
-                    ar_import = np.full(ar_pred.shape, s_row.max_importance, dtype=np.int16)
-                    #max_importance = important_features(dt_model, ar_pred, nodata)
-                    import_band = fill_tile_band(this_size, ar_import, tile_inds, nodata)
-                    importance_bands.append(import_band)
-                except Exception as e:
-                    print e
-                    continue#'''
-            print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
-            #import pdb; pdb.set_trace()
-            ar_tile = np.dstack(pred_bands)
-            #nd_impr = np.dstack(importance_bands)
-            del pred_bands#, importance_bands#, ar_import
-            t3 = time.time()
-            this_mean = np.nanmean(ar_tile, axis=2)
-            #this_vote = mode(ar_tile, axis=2)
-            #this_stdv = np.nanstd(ar_tile, axis=2) * 100 #Multiply b/c converting to int
-            #this_coun = np.sum(~np.isnan(ar_tile), axis=2)
-            #this_impr = mode(nd_impr, axis=2)
-            #this_wtmn_10 = weighted_mean(ar_tile, this_vote, c=10)
-            #this_wtmn_20 = weighted_mean(ar_tile, this_vote, c=20)
-            
-            nans = np.isnan(this_mean)
-            nans = np.isnan(this_vote)
-            this_mean[nans] = nodata
-            #this_stdv[nans] = nodata
-            #this_impr[nans] = nodata
-            #this_vote[nans] = nodata
-            #this_coun[nans] = nodata
-            #this_wtmn_10[nans] = nodata
-            #this_wtmn_20[nans] = nodata
-            
-            print 'Aggregating: %.1f minutes' % ((time.time() - t3)/60)
-        print 'Total aggregation time: %.1f minutes\n' % ((time.time() - t1)/60)    
-        
-        # Fill in the tile in the final arrays
-        ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[t_ind]
-        ar_mean[ul_r : lr_r, ul_c : lr_c] = this_mean.astype(np.int16)
-        #ar_vote[ul_r : lr_r, ul_c : lr_c] = this_vote.astype(np.int16)
-        #ar_stdv[ul_r : lr_r, ul_c : lr_c] = this_stdv.astype(np.int16)
-        #ar_coun[ul_r : lr_r, ul_c : lr_c] = this_coun
-        #ar_impr[ul_r : lr_r, ul_c : lr_c] = this_impr
-        #ar_wtmn_10[ul_r : lr_r, ul_c : lr_c] = this_wtmn_10
-        #ar_wtmn_20[ul_r : lr_r, ul_c : lr_c] = this_wtmn_20
-    
-    # Mask arrays
-    #mask, tx_mask = get_nonforest_mask(lc_path, ag_path, lc_vals, ag_vals)
-    #mask_array(ar_mean, mask, mosaic_tx, tx_mask)
-    #mask_array(ar_vote, mask, mosaic_tx, tx_mask)
-    
-    # Write final rasters to disk
-    out_template = os.path.join(out_dir, file_stamp + '_%s.bsq')
-    out_path = out_template % 'mean'
-    mosaic.array_to_raster(ar_mean, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
-    
-    out_path = out_template % 'vote'
-    #mosaic.array_to_raster(ar_vote, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)   
-    
-    out_path = out_template % 'stdv'
-    #mosaic.array_to_raster(ar_stdv, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)
-    
-    #out_path = out_path.replace('stdv', 'countagg')
-    #mosaic.array_to_raster(ar_coun, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = out_template % 'importance'
-    #mosaic.array_to_raster(ar_impr, mosaic_tx, prj, driver, out_path, GDT_Int16, nodata)  
-    
-    #out_path = os.path.join(out_dir, file_stamp + '_weightedmean_10.bsq')
-    #mosaic.array_to_raster(ar_wtmn_10, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    out_path = os.path.join(out_dir, file_stamp + '_weightedmean_20.bsq')
-    #mosaic.array_to_raster(ar_wtmn_20, mosaic_tx, prj, driver, out_path, GDT_Int32, nodata)
-    
-    print '\nTotal aggregation run time: %.1f hours' % ((time.time() - t0)/3600)
-    #return predictions, df_sets, df_train
-    #return df_tiles, df_these_sets, ar_mean, ar_tile, ar_out
-    #return ar_out
-    #del ar_impr, ar_pred, ar_stdv, ar_tile, this_impr, this_mean, this_stdv, this_vote, #this_wtmn_20, ar_coun, this_coun, this_wtmn_10, ar_wtmn_20, ar_wtmn_10
-    
-    return None, ar_vote, None, None#"""
 
 
 def aggregate_predictions(ysize, xsize, nodata, n_tiles, mosaic_ds, support_size, prediction_dir, df_sets, out_dir, file_stamp, prj, driver, mosaic_nodata=0):

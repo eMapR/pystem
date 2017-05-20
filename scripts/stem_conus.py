@@ -240,7 +240,6 @@ def split_train_test(df, pct_train=.8):
         df_train = df[df.row.isin(rows) & df.col.isin(cols)]
         # Get all of the obs not from those row,cols for testing
         df_test = df[~df.index.isin(df_train.index)]
-        #df_test = df[~df['row'].isin(rows) & ~df['col'].isin(cols)]
 
     except ValueError:
         # A value error likely means n_train > len(df). This isn't
@@ -278,28 +277,18 @@ def get_obs_within_sets(df_train, df_sets, min_obs, pct_train=None):
         if df_sets.ix[i, 'n_samples'] < min_obs:
             continue
         inds = random.sample(df.index, int(len(df) * .63))
-        #df_b = df.ix[inds]
-        #df_b['set_id'] = i
         train_dict[i] = inds
         keep_sets.append(i)
         # Get the out of bag samples
         oob_inds = df.index[~df.index.isin(inds)]
-        #df_oob['set_id'] = i
         oob_dict[i] = oob_inds
         
     # Drop any sets that don't contain enough training observations
-    #train = [df for df in dfs if len(df) > min_obs]
-    #df_train = pd.concat(trn_list)
     total_sets = len(df_sets)
-    #keep_sets = df_train.set_id.unique()
-    #keep_sets = np.array(keep_sets)
     df_drop = df_sets[~df_sets.index.isin(keep_sets)] # Sets not in keep_sets
     n_dropped = len(df_drop)
     print '%s of %s sets dropped because they contained too few observations\n' % (n_dropped, total_sets)
     df_sets = df_sets.ix[keep_sets]
-    
-    #df_oob = pd.concat(oob_list)
-    #df_oob = df_oob[df_oob.set_id.isin(keep_sets)]
     
     return train_dict, df_sets, oob_dict, df_drop, df_test
     
@@ -310,7 +299,6 @@ def coords_to_shp(df, prj_shp, out_shp):
     represents a unique set of coordinates of a rectangle feature.
     '''
     # Get spatial reference
-    #import pdb; pdb.set_trace()
     ds_prj = ogr.Open(prj_shp)
     lyr_prj = ds_prj.GetLayer()
     srs = lyr_prj.GetSpatialRef()
@@ -394,7 +382,7 @@ def get_coords(shp, multipart=None):
         return None
     lyr = ds.GetLayer()
     
-    # For each feature, get geometry ref.
+    # For each feature, get coords
     coords = []
     for i in xrange(lyr.GetFeatureCount()): 
         this_lyr = lyr.GetFeature(i)
@@ -404,7 +392,6 @@ def get_coords(shp, multipart=None):
             coords.extend(these_coords)
         else:
             coords.append(these_coords)
-
     
     # Need the bounds for calculating relative xy in image coords
     bounds = lyr.GetExtent()
@@ -469,15 +456,7 @@ def plot_sets_on_shp(ds_coords, max_size, df_sets, support_size, out_dir=None, f
         sub.add_patch(plt.Rectangle((ll_x, ll_y), w, h, facecolor='b', ec='none', lw='0.5', alpha=.1, label=ind))
         if label_sets:
             plt.text(r.ctr_x, r.ctr_y, str(ind), ha='center')
-    # Plot the support sets
-    #for ind, r in df_tiles.iterrows():
-        #print ind
-    '''ll_x = df_tiles['ul_x']# - x_min) * x_scale
-    ll_y = df_tiles['lr_y']# - y_min) * y_scale
-    w = tile_size[1]# * x_scale
-    h = tile_size[0]# * y_scale
-    #if ll_y == minmin_y:
-    sub.add_patch(plt.Rectangle((ll_x, ll_y), w, h, facecolor='none', ec='k', lw='0.5', alpha=.7, label=ind))'''
+
     if out_dir:
         plt.savefig(os.path.join(out_dir, 'support_sets.png'))
     else:
@@ -485,6 +464,7 @@ def plot_sets_on_shp(ds_coords, max_size, df_sets, support_size, out_dir=None, f
 
 
 def tx_from_shp(shp, x_res, y_res):
+    ''' Return a GeoTransform of a shapefile if it were rasterized '''
     
     ds = ogr.Open(shp)
     lyr = ds.GetLayer()
@@ -517,6 +497,7 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
         min_x, min_y, max_x, max_y, x_res, y_res, tx = get_raster_bounds(mosaic_path)
     min_x, min_y, max_x, max_y = [int(c) for c in [min_x, min_y, max_x, max_y]]
     
+    # Make the randomly placed grid
     cells = generate_gsrd_grid(cell_size, min_x, min_y, max_x, max_y, x_res, y_res)
     df_grid = pd.DataFrame(cells, columns=['ul_x', 'ul_y', 'lr_x', 'lr_y'])
     out_dir = os.path.dirname(out_txt)
@@ -534,8 +515,6 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
     
     print 'Sampling observations within support sets...'
     t1 = time.time()
-    #if pct_train: 
-        #df_train, df_test = split_train_test(df_train, pct_train)
     train_dict, df_sets, oob_dict, df_drop, df_test = get_obs_within_sets(df_train, df_sets, min_obs, pct_train)
         
     set_shp = os.path.join(out_dir, 'gsrd_sets.shp')
@@ -578,16 +557,15 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
     is in the filename. Optionally, if path_filter is specified, only a path that
     contains path_filter will be returned.
     '''
-    '''if not os.path.exists(basepath):
-        print 'basepath does not exist: \n%s' % basepath
-        return None'''
+    if not os.path.exists(basepath):
+        sys.exit('basepath does not exist: \n%s' % basepath)
      
     if tsa_str: 
         bp = os.path.join(basepath, tsa_str)
         if not os.path.isdir(bp):
             exists = False
+            # Try adding leading zeros and check for an existing direcoty
             for i in range(10):
-                # Try adding leading zeros and check for an existing direcoty
                 tsa_str = '0' + tsa_str
                 bp = os.path.join(basepath, tsa_str)
                 if os.path.isdir(bp):
@@ -992,12 +970,6 @@ def par_predict(args):
                                                 nodata=nodata)
     mosaic_ds = None
     tx_out = coords.ul_x, mosaic_tx[1], mosaic_tx[2], coords.ul_y, mosaic_tx[4], mosaic_tx[5]
-    #ds_tsa = gdal.Open(tile_raster)
-    #tx_out = ds_tsa.GetGeoTransform()
-    #prj = ds_tsa.GetProjection()
-    #tile_ar = ds_tsa.ReadAsArray()
-    #tile_files = ds_tsa.GetFileList()
-    #ds_tsa = None
     
     with open(dt_file, 'rb') as f: 
         dt_model = pickle.load(f)
@@ -1014,9 +986,10 @@ def par_predict(args):
         #   single predictor variable
         temp_nodata = -9999
         ar_predict = get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, tile_mask, temp_nodata, set_id, constant_vars)
-        del tile_ar #Release resources from the tsa array
+        del tile_ar
         
-        nodata_mask = ~ np.any(ar_predict==temp_nodata, axis=1)    
+        # Predict only for pixels where no predictors are nodata
+        nodata_mask = ~ np.any(ar_predict==temp_nodata, axis=1)  
         predictions = dt_model.predict(ar_predict[nodata_mask]).astype(dtype)
         ar_prediction = np.full(ar_predict.shape[0], nodata, dtype=dtype)
         ar_prediction[nodata_mask] = predictions
@@ -1028,9 +1001,6 @@ def par_predict(args):
         np_dtype = get_min_numpy_dtype(ar_prediction)
         gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
         mosaic_by_tsa.array_to_raster(ar_prediction, tx_out, prj, driver, out_path, gdal_dtype, nodata=nodata)
-        
-        # Clean up the tsa raster because we don't need it permanently
-        #for f in tile_files: os.remove(f)
         
     except:
         print 'set_count: ', set_count, 'set_id: ', set_id
@@ -1457,7 +1427,7 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
             tile_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
         else: # Otherwise, it's a path to a shapefile
             tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, tile_coords[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx_tile, -9999)
-            mosaic_by_tsa.array_to_raster(tile_mask, tx_tile, prj, driver, os.path.join(tile_dir, 'delete_%s.tif' % ind), nodata=-9999)
+            #mosaic_by_tsa.array_to_raster(tile_mask, tx_tile, prj, driver, os.path.join(tile_dir, 'delete_%s.tif' % ind), nodata=-9999)
             tile_mask = tile_mask != -9999
            
         # If it's empty, skip and add it to the list
