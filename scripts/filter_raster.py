@@ -6,15 +6,16 @@ Created on Thu Oct 20 14:13:57 2016
 """
 import os
 import sys
-import gdal
 import time
 import shutil
 import numpy as np
+from osgeo import gdal, gdalnumeric
 from multiprocessing import Pool
 from scipy import ndimage as ndi
 from stem import get_tiles, find_empty_tiles, mode, coords_to_shp
 from mosaic_by_tsa import array_to_raster
 
+from lthacks import createMetadata, write_params_to_meta
 
 def read_params(txt):
     '''
@@ -80,11 +81,29 @@ def is_equal_to(ar, center_idx):
 def par_filter(args):
     
     t0 = time.time()
-    ind, ar, func, kernel, extra_args, i, n_tiles = args
+    #ind, ar, func, kernel, extra_args, i, n_tiles = args
+    ind, path, databand, nodata, r, tile_coords, out_dir, func, kernel, extra_args, i, n_tiles = args
+    ds = gdal.Open(path)
+    nrows = r.lr_r - r.ul_r
+    ncols = r.lr_c - r.ul_c
+    ar = ds.GetRasterBand(databand).ReadAsArray(r.ul_c, r.ul_r, ncols, nrows)
+    mask = ar == nodata
+    if np.all(mask):
+        return ind, None
     ar = ndi.generic_filter(ar, func, footprint=kernel, extra_arguments=extra_args)
+    ar[mask] = nodata
+    
+    _, x_res, _, _, _, y_res = ds.GetGeoTransform()
+    driver = gdal.GetDriverByName('gtiff')
+    prj = ds.GetProjection()
+    tx = tile_coords.ul_x, x_res, 0, tile_coords.ul_y, 0, y_res
+    out_path = os.path.join(out_dir, 'tile_%s.tif' % ind)
+    array_to_raster(ar, tx, prj, driver, out_path, nodata=nodata)
+    
     print 'Time for tile %s of %s: %.1f minutes' % (i, n_tiles, ((time.time() - t0)/60))
-
-    return ind, ar
+    ds = None
+    
+    return ind, out_path
 
 
 def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value=None):
@@ -141,21 +160,23 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     tx = ds.GetGeoTransform()
     prj = ds.GetProjection()
     driver = ds.GetDriver()
+    xsize = ds.RasterXSize
+    ysize = ds.RasterYSize
     
     # Get an array and mask out nodata values with nans
     if 'nodata' not in inputs:
         print 'nodata not specified in params. Getting nodata value from input dataset...\n'
         nodata = band.GetNoDataValue()
-    ar = band.ReadAsArray()
+    '''ar = band.ReadAsArray()
     ds = None
     array_dtype = ar.dtype
-    ar = ar.astype(np.float32)
-    mask = (ar != nodata) & (ar != 255)
-    ar[~mask] = np.nan
+    ar = ar.astype(np.float16)
+    mask = (ar != nodata) #& (ar != 255)
+    ar[~mask] = np.nan'''
     if 'area' in function.lower():
         ar[(ar != filter_value) & mask] = 0
     #import pdb; pdb.set_trace()
-    ysize, xsize = ar.shape
+    #ysize, xsize = ar.shape
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     if kernel_type.lower() == 'circle':
@@ -163,6 +184,7 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
         kernel = circle_mask(kernel_size)
     else:
         kernel = np.ones((kernel_size, kernel_size))
+    
     tile_buffer = kernel.shape[0]/2
     # Tile up the array to filter in parallel
     # Find empty tiles
@@ -171,13 +193,13 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     df_tiles, df_tiles_rc, _ = get_tiles(n_tiles, xsize, ysize, tx)
 
     total_tiles = len(df_tiles)
-    empty_tiles = find_empty_tiles(df_tiles, mask, tx)
+    '''empty_tiles = find_empty_tiles(df_tiles, mask, tx)
     df_tiles = df_tiles_rc.select(lambda x: x not in empty_tiles)
     print '%s empty tiles found of %s total tiles\n%.1f minutes\n' %\
-    (len(empty_tiles), total_tiles, (time.time() - t1)/60)
+    (len(empty_tiles), total_tiles, (time.time() - t1)/60)'''
     
     # Add buffer around each tile
-    df_buf = df_tiles.copy()
+    df_buf = df_tiles_rc.copy()
     df_buf[['ul_r', 'ul_c']] = df_buf[['ul_r', 'ul_c']] - tile_buffer
     df_buf[['lr_r', 'lr_c']] = df_buf[['lr_r', 'lr_c']] + tile_buffer
     df_buf[['ul_r', 'lr_r']] = df_buf[['ul_r', 'lr_r']].clip(0, ysize)
@@ -188,27 +210,36 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     t1 = time.time()
     n_full_tiles = len(df_tiles)
     args = []
+    temp_dir = os.path.join(out_dir, 'tiles')
+    if not os.path.exists(temp_dir):
+        os.mkdir(temp_dir)
     for i, (ind, r) in enumerate(df_buf.iterrows()):
-        this_ar = ar[r.ul_r : r.lr_r, r.ul_c : r.lr_c]
-        args.append([ind, this_ar, func, kernel, extra_args, i + 1, n_full_tiles])
+        #this_ar = ar[r.ul_r : r.lr_r, r.ul_c : r.lr_c]
+        #args.append([ind, this_ar, func, kernel, extra_args, i + 1, n_full_tiles])
+        args.append([ind, path, databand, nodata, r, df_tiles.ix[ind], temp_dir, func, kernel, extra_args, i + 1, n_full_tiles])
         #arrays.append([i, this_ar])
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     print 'Filtering chunks in parallel with %s jobs...' % n_jobs
     p = Pool(n_jobs)
     tiles = p.map(par_filter, args, 1)
-    print '\nTotal time for filtering: %.1f minutes\n' % ((time.time() - t1)/60)
-    #tiles = arrays'''
+
+    print '\nTotal time for filtering: %.1f minutes\n' % ((time.time() - t1)/60)#'''
+
     
     print 'Tiling pieces back together...'
     t1 = time.time()
-    filtered = np.full(ar.shape, nodata, dtype=array_dtype)
-    #tiles = [[i,np.ones((df_buf.ix[60,'lr_r'] - df_buf.ix[60,'ul_r'], df_buf.ix[60,'lr_c'] - df_buf.ix[60,'ul_c']))]]
-    for i, buffered_tile in tiles:
+    gdal_dtype = band.DataType
+    array_dtype = gdalnumeric.GDALTypeCodeToNumericTypeCode(gdal_dtype)
+    filtered = np.full((ysize, xsize), nodata, dtype=array_dtype)
+    for i, tile_path in tiles:
+        if not tile_path:
+            continue
+        ds_t = gdal.Open(tile_path)
+        buffered_tile = ds_t.ReadAsArray()
         b_inds = df_buf.ix[i, ['ul_r', 'lr_r', 'ul_c', 'lr_c']]
-        t_inds = df_tiles.ix[i, ['ul_r', 'lr_r', 'ul_c', 'lr_c']]
+        t_inds = df_tiles_rc.ix[i, ['ul_r', 'lr_r', 'ul_c', 'lr_c']]
         d_ulr, d_lrr, d_ulc, d_lrc = t_inds - b_inds
-        
         tile = buffered_tile[d_ulr : d_lrr, d_ulc : d_lrc]
         tile[np.isnan(tile)] = nodata
         tile = tile.astype(array_dtype)
@@ -217,15 +248,25 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     print '%.1f minutes\n' % ((time.time() - t1)/60)   
     
     #filtered = filtered.astype(array_dtype)
-    if 'out_nodata' in inputs: nodata = int(inputs['out_nodata'])
-    filtered[np.isnan(filtered) | ~mask] = nodata
-    
-    if ar.max() <= 255 and ar.min() >= 0:
-        gdal_dtype = gdal.GDT_Byte
-    else:
-        gdal_dtype = gdal.GDT_UInt16
-    array_to_raster(filtered, tx, prj, driver, out_path, gdal_dtype, nodata)
+    if 'out_nodata' in inputs: 
+        #filtered[np.isnan(filtered) | ~mask] = nodata
+        filtered[filtered == nodata] = int(inputs['out_nodata'])
+        nodata = int(inputs['out_nodata'])
+
+    try:
+        array_to_raster(filtered, tx, prj, driver, out_path, dtype=gdal_dtype, nodata=nodata)
+    except:
+        array_to_raster(filtered, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
+    desc = ('Raster filtered by kernel of shape {kernel_type} and size ' +\
+            '{kernel_size} and function {func}').format(kernel_type=kernel_type,
+                                                        kernel_size=kernel_size, 
+                                                        func=function)
+    meta_path = createMetadata(sys.argv, out_path, description=desc)
+    write_params_to_meta(meta_path, params)
     del ar, filtered, tiles, args, p
+    ds = None
+    import pdb; pdb.set_trace()
+    shutil.rmtree(temp_dir)
     
     print 'Total time: %.1f minutes' % ((time.time() - t0)/60)
 
