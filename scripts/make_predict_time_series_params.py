@@ -51,6 +51,7 @@ def main(predict_params, start_year, end_year, out_dir, txt_out_dir, n_jobs_pred
             txt.write('n_tiles; %s\n' % param_dict['n_tiles'])
             txt.write('nodata; %s\n' % param_dict['nodata'])
             txt.write('out_dir; %s\n' % param_dict['out_dir'])
+            txt.write('agg_stats; vote, pct_vote\n')
             txt.write('\nOptional Parameters\n')
             txt.write('file_stamp; %s\n' % param_dict['file_stamp'])
             if int(n_jobs_pred) != 0:
