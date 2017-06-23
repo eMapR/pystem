@@ -10,16 +10,22 @@ from stem import read_params
 
 def main(predict_params, start_year, end_year, out_dir, txt_out_dir, n_jobs_pred=0, n_jobs_agg=0, confusion=False):
     
-    param_dict, df_var = read_params(predict_params)
+    param_dict, df_var_orig = read_params(predict_params)
     for k, v in param_dict.iteritems():
         param_dict[k] = v.replace('"','')
     
     param_basename = os.path.basename(predict_params)
+    out_txt = os.path.join(txt_out_dir, param_basename)
     if not os.path.isdir(txt_out_dir):
         os.mkdir(txt_out_dir)
-        
+    
     for year in range(int(start_year), int(end_year) + 1):
         print 'Making params for year %s...' % year
+        
+        #################################################################################
+        # jdb added 6/2/2017 - make a fresh copy of the original df_var otherwise line 32 won't work right
+        df_var = df_var_orig.copy()     
+        #################################################################################
         
         # Write the variable param table first
         band = year - 1983 # 1983 becuse gdal bands start at 1

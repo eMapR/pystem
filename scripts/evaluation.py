@@ -1204,7 +1204,18 @@ for m in models:
 #p_path = '/vol/v2/stem/canopy/outputs/canopy_20160311_2209/canopy_20160311_2209_final_vote.bsq'
 #t_path = '/vol/v2/stem/canopy/truth_map/canopy2001_CAORWA.bsq'
 
-'''p_path = '/vol/v2/stem/imperv/models/imperv_20161012_0958/imperv_20161012_0958_vote.bsq'
+
+
+
+
+
+
+
+
+
+"""
+
+p_path = '/vol/v2/stem/imperv/models/imperv_20161012_0958/imperv_20161012_0958_vote.bsq'
 t_path = '/vol/v2/stem/imperv/truth_map/imperv2001_CAORWA.bsq'
 
 lc_path = '/vol/v1/general_files/datasets/spatial_data/states_spatial_data/calorewash_buffer_spatial_data/calorewash_buffer_nlcd2001_landcover_shift.tif'
@@ -1233,7 +1244,8 @@ nodata_p = 255
 nodata_t = 255
 out_dir = '/vol/v2/stem/canopy/models/canopy_20161018_2254/evaluation_vote' #'''
 
-"""ds_p = gdal.Open(p_path)
+
+ds_p = gdal.Open(p_path)
 ar_p = ds_p.ReadAsArray()
 ds_p = None
 
@@ -1246,7 +1258,11 @@ bins = [(-1,0), (0,10), (10,20), (20,30), (30,40), (40,50), (50, 60), (60, 70), 
 sample_txt = '/vol/v2/stem/imperv/samples/imperv_sample1454542_20161007_0843/imperv_sample1454542_20161007_0843_test.txt'
 #sample_txt = '/vol/v2/stem/canopy/samples/canopy_sample1454542_20161017_1919/canopy_sample1454542_20161017_1919_test.txt'
 df = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
-p_samples, t_samples = get_samples(ar_p, ar_t, df, nodata_p, nodata_t, match=False)
+
+# jdb 5/31/2017 removed df argument from function call because it is not a defined parameter
+p_samples, t_samples = get_samples(ar_p, ar_t, nodata_p, nodata_t, match=False)
+#p_samples, t_samples = get_samples(ar_p, ar_t, df, nodata_p, nodata_t, match=False)
+
 #t_mask = (t_samples > 0) & (p_samples > 0)
 #t_samples = t_samples[t_mask]
 #p_samples = p_samples[t_mask]

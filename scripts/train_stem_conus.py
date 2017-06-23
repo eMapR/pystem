@@ -62,12 +62,32 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists
     shutil.copy2(params, out_dir) #Copy the params for reference '''
 
+    ############################################
+    #JDB 6/2/17 uncommented 
+    ############################################
+    # Make a timestamped output directory if outdir not specified
+    now = datetime.now()
+    date_str = str(now.date()).replace('-','')
+    time_str = str(now.time()).replace(':','')[:4]
+    if not 'out_dirname' in locals(): out_dirname = target_col
+    stamp = '{0}_{1}_{2}'.format(out_dirname, date_str, time_str)
+    out_dir = os.path.join(out_dir, stamp)
+    os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists
+    shutil.copy2(params, out_dir) #Copy the params for reference '''
+    ############################################
+
+
+
     predict_cols = sorted(np.unique([c for c in df_train.columns for v in df_var.index if v in c]))
     df_var = df_var.reindex(df_var.index.sort_values())# Make sure predict_cols and df_var are in the same order
     
     # If there are variables that should remain constant across the modeling
     #   region, get the names
-    '''if 'constant_vars' in locals():
+
+    ############################################
+    #JDB 6/2/17 - uncommented this section
+    ############################################   
+    if 'constant_vars' in locals():
         constant_vars = sorted([i.strip() for i in constant_vars.split(',')])
         predict_cols += constant_vars
     
@@ -118,11 +138,22 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     print 'Saving models...'
     t1 = time.time()
     df_sets, set_txt = stem_conus.write_model(out_dir, df_sets)
-    print '%.1f minutes\n' % ((time.time() - t1)/60)#'''
+    print '%.1f minutes\n' % ((time.time() - t1)/60)
+    ############################################
     
+    
+    """
+    ############################################
+    #JDB 6/2/17 - I don't think this is needed - it may have been sam skipping parts and testing
     
     stamp = os.path.basename(out_dir)
     set_txt = '/vol/v2/stem/conus_testing/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
+    ############################################
+    """
+
+
+
+
     
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
@@ -211,3 +242,9 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
 if __name__ == '__main__':
      params = sys.argv[1]
      sys.exit(main(params))
+
+#params = '/vol/v2/stem/jdb_test/param_files/train_stem_params.txt'
+
+
+
+

@@ -424,8 +424,12 @@ def get_mosaic(mosaic_tx, tsa_ids, tsa_ar, ar_coords, data_band, set_id, files=N
             return None
         these_files = df.file
     else:
-        these_files = [f for f in files for tsa in df['tsa_str'] if tsa in f]
-    
+        these_files = []
+        for f, tsa in zip(files, df['tsa_str']):
+            if tsa in f:
+                these_files.append(f)
+        #these_files = [f for f in files for tsa in df['tsa_str'] if tsa in f]
+        #these_files = files
  
     # Store an array for each TSA and calculate offsets from tsa_ar    
     data_ars = [get_array(f, data_band, (ul_x, ul_y)) for f in these_files]

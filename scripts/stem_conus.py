@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import cPickle as pickle
 import pandas as pd
 import numpy as np
+import pdb
 
 # Import ancillary scripts
 import mosaic_by_tsa
@@ -962,7 +963,6 @@ def par_predict(args):
         mosaic_ds = ogr.Open(mosaic_path)
         mosaic_lyr = mosaic_ds.GetLayer()
         tile_ar, tile_off = mosaic_by_tsa.kernel_from_shp(mosaic_lyr, coords, mosaic_tx, nodata=0)
-        mosaic_lyr
     else:
         mosaic_ds = gdal.Open(mosaic_path)
         tile_ar, tile_off = mosaic_by_tsa.extract_kernel(mosaic_ds, 1, coords,
@@ -1003,8 +1003,20 @@ def par_predict(args):
         mosaic_by_tsa.array_to_raster(ar_prediction, tx_out, prj, driver, out_path, gdal_dtype, nodata=nodata)
         
     except:
-        print 'set_count: ', set_count, 'set_id: ', set_id
-        sys.exit(traceback.print_exception(*sys.exc_info()))
+        print 'problem with set_count: ', set_count, 'set_id: ', set_id
+        errorLog = os.path.dirname(predict_dir)+'/predication_errors.txt'       
+        if not os.path.isfile(errorLog):                 
+            with open(errorLog, 'w') as el:       
+                el.write('set_count: '+str(set_count)+'\n')
+                el.write('set_id: '+str(set_id)+'\n')
+                el.write(traceback.format_exc()+'\n')
+        else:
+            with open(errorLog, 'a') as el:       
+                el.write('set_count: '+str(set_count)+'\n')
+                el.write('set_id: '+str(set_id)+'\n')
+                el.write(traceback.format_exc()+'\n')
+        return
+        #sys.exit(traceback.print_exception(*sys.exc_info()))
     
     print 'Total time for set %s of %s: %.1f minutes' % (set_count + 1, total_sets, (time.time() - t0)/60)
         
@@ -1285,8 +1297,18 @@ def pct_vote(ar, ar_vote, ar_count):
 
 def aggregate_tile(tile_coords, n_tiles, nodata_mask, support_size, agg_stats, prediction_dir, df_sets, nodata, out_dir, file_stamp, tx, prj, ar_tile=None):
     
+    ############################################################################################################################
+    # jdb added 6/22/2017 
+    # for testing purposes, skip tiles that have already been aggregated
+    path_template = os.path.join(out_dir, 'tile_{0}_*'.format(tile_coords.name))
+    #pdb.set_trace()    
+    if len(glob.glob(path_template)) != 0:
+      print 'Aggregating for %s of %s tiles is already done - skipping...' % (tile_coords.name + 1, n_tiles)
+      return
+    
     t0 = time.time()
     print 'Aggregating for %s of %s tiles...' % (tile_coords.name + 1, n_tiles)
+    ############################################################################################################################
     
     # Get overlapping sets
     x_res = tx[1]
@@ -1444,7 +1466,7 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
                 aggregate_tile(tile_coords, n_tiles, tile_mask, support_size, agg_stats, prediction_dir,
                            df_sets, nodata, tile_dir, file_stamp, tx_tile, prj)
             except:
-                print 'Prblem with tile ', ind
+                print 'Problem with tile ', ind
                 print traceback.print_exception(*sys.exc_info())
     
     # agregate in parallel if n_jobs is given

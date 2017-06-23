@@ -35,7 +35,6 @@ def parse_constant_vars(constant_vars):
 
     
 def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs_pred=0, n_jobs_agg=0, mosaic_nodata=0):
-    
     inputs, df_var = stem_conus.read_params(params)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])    
@@ -158,6 +157,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             # Build list of args to pass to the Pool
             #tsa_off = stem_conus.calc_offset((mosaic_tx[0], mosaic_tx[3]), (tx_out[0], tx_out[3]), tx_out)
             args.append([coords, mosaic_type, mosaic_path, mosaic_tx, prj, nodata, c, total_sets, set_id, df_var, xsize, ysize, row.dt_file, nodata, np.uint8, constant_vars, predict_dir])
+            
             #args.append([c, total_sets, set_id, df_var, set_mosaic_path, tsa_off, coords, 
                          #mosaic_tx, xsize, ysize, row.dt_file, nodata, np.uint8, 
                          #constant_vars, predict_dir])
@@ -199,6 +199,18 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     else:
         if 'mosaic_nodata' in inputs: mosaic_nodata = int(mosaic_nodata)
         nodata_mask = mosaic_ds.ReadAsArray() != mosaic_nodata
+    
+    ########################################################################################################################################
+    # jdb 6/22/17 check for sets that errored - if there are any, remove them from the df_sets DF so that the aggregation step doesn't expect them
+    setErrorLog = os.path.dirname(predict_dir)+'/predication_errors.txt'    
+    if os.path.isfile(setErrorLog):   
+      with open(setErrorLog) as f:
+        lines = f.readlines()
+    
+      badSets = [int(line.split(':')[1].rstrip().strip()) for line in lines if 'set_id' in line]
+      for thisSet in badSets:
+        df_sets = df_sets[df_sets.index != thisSet]
+    ########################################################################################################################################  
     
     pct_importance, df_sets = stem_conus.aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, mosaic_tx, support_size, agg_stats, predict_dir, df_sets, out_dir, file_stamp, prj, driver, n_jobs_agg)
     #print 'Total aggregation time: %.1f hours\n' % ((time.time() - t0)/3600)
@@ -276,8 +288,8 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     print '\nTotal prediction runtime: %.1f\n' % ((time.time() - t0)/60)
 
 if __name__ == '__main__':
-     params = sys.argv[1]
-     sys.exit(main(params))#'''
+    params = sys.argv[1]
+    sys.exit(main(params))#'''
 
 
 ''' ############# Testing ################ '''

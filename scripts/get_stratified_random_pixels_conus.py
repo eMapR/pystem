@@ -93,7 +93,10 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
     xsize = ds.RasterXSize 
     ysize = ds.RasterYSize
     df_tiles, df_tiles_rc, tile_size = stem_conus.get_tiles(n_tiles, xsize, ysize, tx)
-    stem_conus.coords_to_shp(df_tiles, '/vol/v2/stem/extent_shp/CAORWA.shp', '/home/server/student/homes/shooper/tiles_delete.shp')
+    
+    # jdb 5/31/2017 changed the path of the out shapefile *tiles_delete.shp - crashing here, maybe can't write to sam's home dir
+    stem_conus.coords_to_shp(df_tiles, '/vol/v2/stem/extent_shp/CAORWA.shp', '/vol/v2/stem/scratch/tiles_delete.shp')
+    #stem_conus.coords_to_shp(df_tiles, '/vol/v2/stem/extent_shp/CAORWA.shp', '/home/server/student/homes/shooper/tiles_delete.shp')
     total_tiles = len(df_tiles)
     samples_per = n_samples/total_tiles
     
