@@ -647,7 +647,7 @@ def write_decisiontree(dt, filename):
     Pickle a decision tree and write it to filename. Return the filename.
     '''
     with open(filename, 'w+') as f:
-        pickle.dump(dt, f, protocol=-1) #protocol kw might hreduce load time
+        pickle.dump(dt, f, protocol=-1) #protocol -1 might reduce load time
         
     return filename
     
@@ -882,7 +882,7 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
     '''
     t0 = time.time()
     predictors = []
-    for ind, var in enumerate(df_var.index):
+    for ind, var in enumerate(df_var.ix[['brightness']].index):
         #this_tile_ar = np.copy(tile_ar)
         data_band, search_str, basepath, by_tile, path_filter = df_var.ix[var]
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
@@ -890,7 +890,15 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
         if by_tile:
             files = [find_file(basepath, search_str, tile, path_filter) for tile in tile_strs]
             ar_var = mosaic_by_tsa.get_mosaic(mosaic_tx, tile_strs, tile_ar, coords, data_band, set_id, files)
-            
+            if var == 'brightness':
+                ds = gdal.Open(files[0])
+                prj = ds.GetProjection()
+                ds = None
+                driver = gdal.GetDriverByName('envi')
+                this_tx = coords.ul_x, 30, 0, coords.ul_y, 0, -30
+                out_path = '/home/server/pi/homes/shooper/delete.bsq'
+                array_to_raster(ar_var, this_tx, prj, driver, out_path)
+                import pdb; pdb.set_trace()
         else:
             try:
                 this_file = find_file(basepath, search_str, path_filter=path_filter)

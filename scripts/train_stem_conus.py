@@ -51,20 +51,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         msg = 'Columns not in sample_txt but specified in params:\n\t' + unmatched_str
         import pdb; pdb.set_trace()
         raise NameError(msg)
-        
-    '''# Make a timestamped output directory if outdir not specified
-    now = datetime.now()
-    date_str = str(now.date()).replace('-','')
-    time_str = str(now.time()).replace(':','')[:4]
-    if not 'out_dirname' in locals(): out_dirname = target_col
-    stamp = '{0}_{1}_{2}'.format(out_dirname, date_str, time_str)
-    out_dir = os.path.join(out_dir, stamp)
-    os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists
-    shutil.copy2(params, out_dir) #Copy the params for reference '''
-
-    ############################################
-    #JDB 6/2/17 uncommented 
-    ############################################
+    
     # Make a timestamped output directory if outdir not specified
     now = datetime.now()
     date_str = str(now.date()).replace('-','')
@@ -74,7 +61,6 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     out_dir = os.path.join(out_dir, stamp)
     os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists
     shutil.copy2(params, out_dir) #Copy the params for reference '''
-    ############################################
 
 
 
@@ -114,10 +100,10 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     for ind in df_sets.index:
         this_x = x_train.ix[train_dict[ind]]
         this_y = y_train.ix[train_dict[ind]]
-        df_sets.ix[ind, 'dt_model'] = model_func(this_x, this_y, max_features)
-    #df_sets['dt_model'] = [model_func(x_train.ix[x_train.set_id==s, predict_cols],\
-    #y_train.ix[y_train.set_id==s, target_col], max_features) for s in df_sets.index]
-    #del df_train
+        dt_model = model_func(this_x, this_y, max_features)
+        df_sets.ix[ind, 'dt_model'] = dt_model
+        importance_cols = ['i_%s' % c for c in predict_cols]
+        df_sets.ix[ind, importance_cols] = dt_model.feature_importances_
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Calculate OOB rates and drop sets with too low OOB
