@@ -24,6 +24,7 @@ import stem_conus
 from lthacks import attributes_to_df
 
 gdal.UseExceptions()
+
 # Turn off the stupid setting as copy warning for pandas dataframes
 pd.options.mode.chained_assignment = None
 
@@ -127,9 +128,11 @@ def within(x, y, poly):
         dist1 = ((y1 - y)**2 + (x1 - x)**2)**.5
         dist2 = ((y2 - y)**2 + (x2 - x)**2)**.5
         dist = ((y1 - y2)**2 + (x1 - x2)**2)**.5
-        if dist1 + dist2 == dist:
+        if dist1 + dist2 == dist: # This might not work because of rounding errors
             return True#'''
-    '''xmin = poly[0][0]
+    '''
+    # Only works for square tiles
+    xmin = poly[0][0]
     ymax = poly[0][1]
     for i in xrange(1, n_vertices):
         x1, y1 = min(poly[i])
@@ -212,12 +215,16 @@ def extract_from_shp(lyr, df_xy, id_field=None, n_jobs=0):
             feature_id = feature.GetFID()
             args.append([geom_coords, xy_temp, id_field, feature_id, i, n_features])
             feature.Destroy()
-        print 'Time for getting args: %.1f seconds\n' % (time.time() - t1)
+            sys.stdout.write('\rInitial filter of points for (%%%.1f) of features' % (float(i)/n_features * 100))
+            sys.stdout.flush()
+        print '\nTime for getting args: %.1f seconds\n' % (time.time() - t1)
 
         # Predict in parallel
         t1 = time.time()
         pool = Pool(n_jobs)
         points = pool.map(par_within, args, 1)
+        pool.close()
+        pool.join()
         print '\nTime for extraction: %.1f minutes\n' % ((time.time() - t1)/60)
         
         t1 = time.time()
@@ -267,7 +274,6 @@ def extract_at_xy(df, mosaic, data_tx, val_name):
     if type(mosaic) == ogr.Layer:
         df = extract_from_shp(mosaic, df, val_name, n_jobs=n_jobs)
         val_name = 'tile_fid'
-        df.to_csv('/home/server/homes/student/shooper/delete.csv')
      
     # Otherwise, it's a numpy array
     else:
@@ -397,16 +403,23 @@ def calc_row_stats(ar, data_type, var_name, nodata):
     return val_stats
 
 
-def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, basepath, search_str, path_filter, mosaic_tx, last_file, n_files, nodata=None, kernel=False):
+def par_extract_by_rowcol(args):
+    
+    sys.stdout.write('\rFile count: %s' % args[-1])
+    sys.stdout.flush()
+    return extract_by_rowcol(*args[:-1])
+    
+
+def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, basepath, search_str, path_filter, mosaic_tx, file_count, n_files, nodata=None, kernel=False):
     '''
     Return a dataframe of 
     '''
-    
+    t0 = time.time()
     dfs = [] # For storing kernel and stats
     var_col = var_name# + str(year)
     file_col = 'file_' + var_col
-    file_count = last_file
-    # Store the filepath for each TSA
+    #file_count = last_file
+    # Store the filepath for each tile
     if by_tile:
         df_tile[file_col] = [find_file(basepath, search_str.format(year), tile, path_filter)
         for tile in df_tile.tile_id] 
@@ -415,7 +428,7 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, b
     # Handle any rows for for which the file is null
     if df_tile[file_col].isnull().any():
         df_null = df_tile[df_tile[file_col].isnull()]
-        print 'TSAs excluded from extractions for %s from %s:' % (var_name, year)
+        print 'Tiles excluded from extractions for %s from %s:' % (var_name, year)
         for ind, row in df_null.iterrows(): print row['tile_str']
         print ''
         n_null = len(df_null)
@@ -433,19 +446,31 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, b
 
     # For each file, get the dataset as an array and extract all values at each row col
     val_cols = ['%s_%s' % (var_col, i) for i in range(1,10)]
-    for f in df_tile[file_col].unique():
+    '''for f in df_tile[file_col].unique():
         print 'Extracting for array %s of approximately %s from:\n%s\n'\
         % (last_file, n_files, f)
         dfs.append(extract_by_rowcol(df_xy, f, file_col, var_col, data_band,
                                      mosaic_tx, val_cols, data_type, nodata,
                                      kernel
                                      ))
-        last_file += 1
-        
+        file_count += 1'''
+    args = []
+    for i, f in enumerate(df_tile[file_col].unique()):
+        args.append([df_xy, f, file_col, var_col, data_band, mosaic_tx, val_cols, data_type, nodata, kernel, i + 1 + file_count])
+    n_jobs=10
+    pool = Pool(n_jobs)
+    this_count = len(args)
+    print 'Extracting from %s-%s files of %s...' % (file_count, file_count + this_count, n_files)
+    dfs = pool.map(par_extract_by_rowcol, args, 1)
+    pool.close()
+    pool.join()
+    print '\nTime for this variable: %.1f minutes\n' % ((time.time() - t0)/60)
+    file_count += this_count
+    
     # Comnbine all the pieces for this year
     df_var = pd.concat(dfs)
     
-    return df_var, last_file - file_count
+    return df_var, file_count
     
 
 def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id_field=None):          
@@ -580,18 +605,18 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
             else: 
                 data_band = int(var_row.data_band)
 
-            df_var, this_count = extract_var(year, var_name, by_tile, data_band,
+            df_var, last_file = extract_var(year, var_name, by_tile, data_band,
                                              data_type, df_tile, df_xy, basepath,
                                              search_str, path_filter, mosaic_tx,
                                              last_file, n_files, nodata, kernel)
             df_yr[df_var.columns] = df_var
-            last_file += this_count
-            #import pdb; pdb.set_trace()
+            #last_file += this_count
         
         # Write df_var with all years for this predictor to txt file
         this_bn = '%s_%s_kernelstats.txt' % (xy_txt_bn[:-4], year)
         this_txt = os.path.join(out_dir, this_bn)
         df_yr.to_csv(this_txt, sep='\t')
+        df_xy[df_vars.index.tolist()] = df_yr[df_vars.index.tolist()]
         print 'Time for year %s: %.1f minutes\n\n' % (year, ((time.time() - t1)/60))
         
     mosaic_ds = None
@@ -599,6 +624,7 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
     # Write the dataframe to a text file
     #if out_dir:
     out_cols = [col for col in df_xy.columns if 'file' not in col]
+    import pdb; pdb.set_trace()
     
     out_bn = xy_txt_bn.replace('.txt', '_predictors.txt')
     out_txt = os.path.join(out_dir, out_bn)
