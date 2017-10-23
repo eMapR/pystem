@@ -193,7 +193,7 @@ def get_offset_array_indices(ar1_shape, ar2_shape, ar2_offset):
     return ar1_bounds, ar2_bounds
     
 
-def kernel_from_shp(mosaic_lyr, coords, mosaic_tx, nodata, val_field='name'):
+def kernel_from_shp(mosaic_lyr, tile_size, coords, mosaic_tx, nodata, val_field='name'):
     
     # Get rid of the annoying warning about spatial refs when rasterizing
     gdal.PushErrorHandler('CPLQuietErrorHandler')
@@ -388,8 +388,11 @@ def array_to_raster(array, tx, prj, driver, out_path, dtype=None, nodata=None, s
         dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
     if driver.ShortName == 'GTiff':
         out_ds = driver.Create(out_path, cols, rows, 1, dtype, ['TILED=YES'])
-    if out_ds is None:
-        sys.exit('\nCould not create ' + out_path)
+    else:
+        out_ds = driver.Create(out_path, cols, rows, 1, dtype)
+    if not out_ds:
+        import pdb; pdb.set_trace()
+        raise IOError('\nCould not create ' + out_path)
     
     # Write the data
     band = out_ds.GetRasterBand(1)

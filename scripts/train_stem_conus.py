@@ -9,7 +9,6 @@ import os
 import sys
 import time
 import shutil
-import fnmatch
 import warnings
 from datetime import datetime
 from osgeo import gdal, ogr
@@ -51,6 +50,8 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         msg = 'Columns not in sample_txt but specified in params:\n\t' + unmatched_str
         import pdb; pdb.set_trace()
         raise NameError(msg)
+    if target_col not in df_train.columns:
+        raise NameError('target_col "%s" not in sample_txt: %s' % (target_col, sample_txt))
     
     # Make a timestamped output directory if outdir not specified
     now = datetime.now()
@@ -62,17 +63,11 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     os.makedirs(out_dir) # With a timestamp in dir, no need to check if it already exists
     shutil.copy2(params, out_dir) #Copy the params for reference '''
 
-
-
     predict_cols = sorted(np.unique([c for c in df_train.columns for v in df_var.index if v in c]))
     df_var = df_var.reindex(df_var.index.sort_values())# Make sure predict_cols and df_var are in the same order
     
     # If there are variables that should remain constant across the modeling
     #   region, get the names
-
-    ############################################
-    #JDB 6/2/17 - uncommented this section
-    ############################################   
     if 'constant_vars' in locals():
         constant_vars = sorted([i.strip() for i in constant_vars.split(',')])
         predict_cols += constant_vars
@@ -82,11 +77,25 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     if snap_coord:
         snap_coord = [int(c) for c in snap_coord.split(',')]
     out_txt = os.path.join(out_dir, stamp + '.txt')
-    train_dict, df_sets, oob_dict = stem_conus.get_gsrd(mosaic_path, cell_size, support_size,
+    '''train_dict, df_sets, oob_dict = stem_conus.get_gsrd(mosaic_path, cell_size, support_size,
+                                              sets_per_cell, df_train, min_obs,
+                                              target_col, predict_cols, out_txt,
+                                              gsrd_shp, pct_train, snap_coord=snap_coord)#'''
+    df_sets = stem_conus.get_gsrd(mosaic_path, cell_size, support_size,
                                               sets_per_cell, df_train, min_obs,
                                               target_col, predict_cols, out_txt,
                                               gsrd_shp, pct_train, snap_coord=snap_coord)
-
+    n_sets = len(df_sets)            
+    '''out_dir = '/vol/v2/stem/conus/models/canopy_20171019_1520'
+    stamp = os.path.basename(out_dir)
+    oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
+    with open(oob_pkl, 'rb') as f:
+        oob_dict = pickle.load(f)
+    train_pkl = os.path.join(out_dir, '%s_train_dict.pkl' % stamp)
+    with open(train_pkl, 'rb') as f:
+        train_dict = pickle.load(f)
+    df_sets = pd.read_csv(os.path.join(out_dir, ))#'''
+    
     # Train a tree for each support set
     t1 = time.time()
     if model_type.lower() == 'classifier':
@@ -97,13 +106,57 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         model_func = stem_conus.fit_tree_regressor
     x_train = df_train.reindex(columns=predict_cols)
     y_train = df_train[target_col]
-    for ind in df_sets.index:
-        this_x = x_train.ix[train_dict[ind]]
+    importance_cols = ['importance_%s' % c for c in predict_cols]
+    for c in importance_cols:
+        df_sets[c] = 0
+    
+    # Train models
+    dropped_sets = pd.DataFrame(columns=df_sets.columns)
+    dt_dir = os.path.join(out_dir, 'decisiontree_models')
+    if not os.path.exists(dt_dir):
+        os.mkdir(dt_dir)
+    dt_path_template = os.path.join(dt_dir, stamp + '_decisiontree_%s.pkl')
+    oob_dict = {}
+    for i, (ind, ss) in enumerate(df_sets.iterrows()):
+        format_obj = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60
+        sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes' % format_obj)
+        sys.stdout.flush()
+        '''this_x = x_train.ix[train_dict[ind]]
         this_y = y_train.ix[train_dict[ind]]
         dt_model = model_func(this_x, this_y, max_features)
         df_sets.ix[ind, 'dt_model'] = dt_model
-        importance_cols = ['i_%s' % c for c in predict_cols]
-        df_sets.ix[ind, importance_cols] = dt_model.feature_importances_
+        df_sets.ix[ind, importance_cols] = dt_model.feature_importances_'''
+        # Get all samples within support set
+        sample_inds = df_train.index[(df_train['x'] > ss[['ul_x', 'lr_x']].min()) &
+        (df_train['x'] < ss[['ul_x', 'lr_x']].max()) &
+        (df_train['y'] > ss[['ul_y', 'lr_y']].min()) &
+        (df_train['y'] < ss[['ul_y', 'lr_y']].max())]
+        
+        n_samples = int(len(sample_inds) * .63)
+        if n_samples < min_obs:
+            df_sets.drop(ind, inplace=True)
+            continue
+        
+        this_x = x_train.ix[sample_inds]
+        this_y = y_train.ix[sample_inds]
+        support_set = df_sets.ix[ind]
+        dt_path = dt_path_template % ind
+        dt_model, train_inds, oob_inds, importance = stem_conus.train_estimator(support_set, n_samples, this_x, this_y, model_func, max_features, dt_path)
+        
+        df_sets.ix[ind, importance_cols] = importance
+        df_sets.ix[ind, 'dt_model'] = dt_model
+        df_sets.ix[ind, 'dt_file'] = dt_path
+        df_sets.ix[ind, 'n_samples'] = n_samples
+        
+        # Save oob and train inds #### Change to database structure
+        t_ind_path = dt_path.replace('.pkl', '_train_inds.txt')
+        with open(t_ind_path, 'w') as f:
+            [f.write('%s\n' % ti) for ti in train_inds]
+        o_ind_path = dt_path.replace('.pkl', '_oob_inds.txt')
+        with open(o_ind_path, 'w') as f:
+            [f.write('%s\n' % oi) for oi in oob_inds]
+        oob_dict[ind] = oob_inds
+
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Calculate OOB rates and drop sets with too low OOB
@@ -122,34 +175,25 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
 
     # Write df_sets and each decison tree to disk
     print 'Saving models...'
+    set_txt = os.path.join(dt_dir, stamp + '_support_sets.txt')
+    df_sets['set_id'] = df_sets.index
+    df_sets.drop('dt_model', axis=1).to_csv(set_txt, sep='\t', index=False)
     t1 = time.time()
-    df_sets, set_txt = stem_conus.write_model(out_dir, df_sets)
-    print '%.1f minutes\n' % ((time.time() - t1)/60)
-    ############################################
+    #df_sets, set_txt = stem_conus.write_model(out_dir, df_sets)
+    print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
-    
-    """
-    ############################################
-    #JDB 6/2/17 - I don't think this is needed - it may have been sam skipping parts and testing
-    
-    stamp = os.path.basename(out_dir)
-    set_txt = '/vol/v2/stem/conus_testing/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
-    ############################################
-    """
-
-
-
-
-    
+    '''stamp = os.path.basename(out_dir)
+    set_txt = '/vol/v2/stem/conus/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
-    with open(oob_pkl, 'rb') as f:
-        oob_dict = pickle.load(f)
-    #predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_bright','delta_green','delta_nbr','delta_wet', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
+    #with open(oob_pkl, 'rb') as f:
+    #    oob_dict = pickle.load(f)
+    oob_dict = {}
+    predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_bright','delta_green','delta_nbr','delta_wet', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
     if make_oob_map:
         # Check if oob_map params were specified. If not, set to defaults
         if 'n_tiles' not in locals():
-            n_tiles = 15, 10
+            n_tiles = 90, 40
             print 'n_tiles not specified. Using default: %s x %s ...\n' % (n_tiles)
             
         else:
@@ -173,13 +217,15 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
                 warnings.warn('Resolution not specified. Assuming default of 30...\n')
             mask = mosaic_ds.GetLayer()
             min_x, max_x, min_y, max_y = mask.GetExtent()
-            xsize = int((max_x - min_x)/resolution)
-            ysize = int((max_y - min_y)/resolution)
+            ul_x = min_x - ((min_x - snap_coord[0]) % resolution)
+            ul_y = max_y - ((max_y - snap_coord[1]) % resolution)
+            xsize = int((max_x - ul_x)/resolution)
+            ysize = int((ul_y - min_y)/resolution)
             prj = mask.GetSpatialRef().ExportToWkt()
             driver = gdal.GetDriverByName('gtiff')
             x_res = resolution
             y_res = -resolution
-            tx = min_x, x_res, 0, max_y, 0, y_res
+            tx = ul_x, x_res, 0, ul_y, 0, y_res
         
         avg_dict, df_sets = stem_conus.oob_map(ysize, xsize, 0, mask, n_tiles, tx,
                                      support_size, oob_dict, df_sets, df_train, target_col,

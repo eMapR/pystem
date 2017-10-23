@@ -514,7 +514,7 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
     df_sets = pd.concat(support_sets)
     df_sets.index = xrange(len(df_sets))# Original index is range(0,n_sets)
     
-    print 'Sampling observations within support sets...'
+    '''print 'Sampling observations within support sets...'
     t1 = time.time()
     train_dict, df_sets, oob_dict, df_drop, df_test = get_obs_within_sets(df_train, df_sets, min_obs, pct_train)
         
@@ -522,7 +522,7 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
     coords_to_shp(df_sets, extent_shp, set_shp)
     coords_to_shp(df_drop, extent_shp, set_shp.replace('_sets.shp', '_dropped.shp'))
     print 'Shapefile of support sets written to:\n%s' % set_shp
-    print 'Time for sampling: %.1f minutes\n' % ((time.time() - t1)/60)
+    print 'Time for sampling: %.1f minutes\n' % ((time.time() - t1)/60)#'''
     
     # Plot the support sets
     '''if extent_shp:
@@ -533,7 +533,7 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
         set_inds = df_train.set_id.unique()
         plot_sets_on_shp(coords, 900, df_sets.ix[set_inds], support_size, out_dir)'''
     
-    # Write train and test dfs to text files
+    '''# Write train and test dfs to text files
     print 'Writing sample dictionaries to disk...'
     t1 = time.time()
     train_path = os.path.join(out_txt.replace('.txt', '_train_dict.pkl'))
@@ -548,9 +548,10 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
         df_test.to_csv(out_txt.replace('.txt', '_test.txt'), sep='\t')
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
-    print 'Train and test dicts written to:\n', os.path.dirname(out_txt), '\n'
-    return train_dict, df_sets, oob_dict
-
+    print 'Train and test dicts written to:\n', os.path.dirname(out_txt), '\n' #'''
+    #return train_dict, df_sets, oob_dict
+    return df_sets
+    
 
 def find_file(basepath, search_str, tsa_str=None, path_filter=None):
     '''
@@ -603,6 +604,22 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
         'search_str {2}\n').format(tsa_str, basepath, search_str))
     
     return paths[0]
+
+
+def train_estimator(support_set, n_samples, x_train, y_train, model_function, max_features, out_path):
+    '''
+    Train an decision tree and write to out_path
+    '''
+    train_inds = random.sample(x_train.index, n_samples)
+    oob_inds = x_train.index[~x_train.index.isin(train_inds)]
+    bootstrap_x = x_train.ix[train_inds]
+    bootstrap_y = y_train.ix[train_inds]
+    dt_model = model_function(bootstrap_x, bootstrap_y, max_features)
+    importance = dt_model.feature_importances_
+
+    write_decisiontree(dt_model, out_path)
+    
+    return dt_model, train_inds, oob_inds, importance
 
 
 def fit_tree_classifier(x_train, y_train, max_features=None):
@@ -738,10 +755,12 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
     t0 = time.time()
     
     ul_x, x_res, _, ul_y, _, y_res = tx
-    
+    res = abs(x_res)
+    set_nrows = support_size[0]/res
+    set_ncols = support_size[1]/res
     df_tiles, df_tiles_rc, tile_size = get_tiles(n_tiles, xsize, ysize, tx)
     total_tiles = len(df_tiles)
-    #coords_to_shp(df_tiles, '/vol/v2/stem/conus_testing/models/landcover_20170420_1347/gsrd_sets.shp', '/vol/v2/stem/conus_testing/models/landcover_20170503_1820/ag_tiles.shp')
+    
     # Find the tiles that have only nodata values
     '''t1 = time.time()
     print '\nFinding empty tiles...'
@@ -766,19 +785,21 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             oob_predictors = this_oob[var_cols]
             df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_samples, oob_predictors)#'''
     empty_tiles = []
-    for i, (tile_id, t_row) in enumerate(df_tiles[4:].iterrows()):
+    for i, (tile_id, t_row) in enumerate(df_tiles.iterrows()):
         t1 = time.time()
         print 'Aggregating for %s of %s tiles' % (i + 1, total_tiles)
         print 'Tile index: ', tile_id
         
         rc = df_tiles_rc.ix[tile_id]
         ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[tile_id]
-        
+        t_nrows = lr_r - ul_r
+        t_ncols = lr_c - ul_c
+
         # Get a mask for this tile
         if type(nodata_mask) == np.ndarray:
             tile_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
         else: # Otherwise, it's a path to a shapefile
-            tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, t_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
+            tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, (t_nrows, t_ncols), t_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
             tile_mask = tile_mask != -9999
         # If it's empty, skip and add it to the list
         if not tile_mask.any():
@@ -803,7 +824,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             #set_coords = s_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
             # Fill a band for this array
             offset = calc_offset(tile_ul, (s_row.ul_x, s_row.ul_y), tx)
-            tile_inds, a_inds = mosaic_by_tsa.get_offset_array_indices(tile_size, (support_size[0]/30, support_size[1]/30), offset)
+            tile_inds, a_inds = mosaic_by_tsa.get_offset_array_indices(tile_size, (set_nrows, set_ncols), offset)
             nrows = a_inds[1] - a_inds[0]
             ncols = a_inds[3] - a_inds[2]
             try:
@@ -813,8 +834,11 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             
             oob_band = np.full(this_size, nodata)
             oob_band[tile_inds[0]:tile_inds[1], tile_inds[2]:tile_inds[3]] = ar_oob_rate
-            oob_band = oob_band.astype(np.float16)
-            oob_band[~tile_mask | (oob_band==nodata)] = np.nan
+            try:
+                oob_band = oob_band.astype(np.float16)
+                oob_band[~tile_mask | (oob_band==nodata)] = np.nan
+            except:
+                import pdb; pdb.set_trace()
             oob_bands.append(oob_band)
             oob_rates.append(s_row.oob_rate)
          
@@ -1043,6 +1067,7 @@ def get_tiles(n_tiles, xsize, ysize, tx=None):
     ul_cols = np.repeat([i * tile_cols for i in range(n_tiles[1])], n_tiles[0])
     lr_rows = ul_rows + tile_rows
     lr_cols = ul_cols + tile_cols
+
     # Make sure the last row/col lines up with the dataset 
     lr_rows[-1] = ysize
     lr_cols[-1] = xsize
