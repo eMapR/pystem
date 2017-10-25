@@ -117,9 +117,10 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         os.mkdir(dt_dir)
     dt_path_template = os.path.join(dt_dir, stamp + '_decisiontree_%s.pkl')
     oob_dict = {}
+    oob_rates = [0]
     for i, (ind, ss) in enumerate(df_sets.iterrows()):
-        format_obj = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60
-        sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes' % format_obj)
+        format_obj = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, int(np.mean(oob_rates))
+        sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes. Avg oob: %s' % format_obj)
         sys.stdout.flush()
         '''this_x = x_train.ix[train_dict[ind]]
         this_y = y_train.ix[train_dict[ind]]
@@ -141,12 +142,14 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         this_y = y_train.ix[sample_inds]
         support_set = df_sets.ix[ind]
         dt_path = dt_path_template % ind
-        dt_model, train_inds, oob_inds, importance = stem_conus.train_estimator(support_set, n_samples, this_x, this_y, model_func, max_features, dt_path)
-        
+        dt_model, train_inds, oob_inds, importance, oob_metrics = stem_conus.train_estimator(support_set, n_samples, this_x, this_y, model_func, model_type, max_features, dt_path)
+        oob_rates.append(oob_metrics['oob_rate'])
         df_sets.ix[ind, importance_cols] = importance
         df_sets.ix[ind, 'dt_model'] = dt_model
         df_sets.ix[ind, 'dt_file'] = dt_path
         df_sets.ix[ind, 'n_samples'] = n_samples
+        for metric in oob_metrics:
+            df_sets.ix[ind, metric] = oob_metrics[metric]
         
         # Save oob and train inds #### Change to database structure
         t_ind_path = dt_path.replace('.pkl', '_train_inds.txt')

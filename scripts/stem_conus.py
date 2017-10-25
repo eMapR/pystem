@@ -18,6 +18,7 @@ from random import sample as randomsample
 from string import ascii_lowercase
 from osgeo import gdal, ogr, gdal_array
 from sklearn import tree, metrics
+from sklearn.externals import joblib
 from multiprocessing import Pool
 import matplotlib.pyplot as plt
 import cPickle as pickle
@@ -28,7 +29,7 @@ import pdb
 # Import ancillary scripts
 import mosaic_by_tsa
 import evaluation as ev
-from lthacks import get_min_numpy_dtype, array_to_raster, df_to_shp #using this makes no longer portable to any other system than Islay
+from lthacks import get_min_numpy_dtype, array_to_raster, df_to_shp, stats_functions #using this makes no longer portable to any other system than Islay
 
 gdal.UseExceptions()
 warnings.filterwarnings('ignore')
@@ -606,7 +607,7 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
     return paths[0]
 
 
-def train_estimator(support_set, n_samples, x_train, y_train, model_function, max_features, out_path):
+def train_estimator(support_set, n_samples, x_train, y_train, model_function, model_type, max_features, out_path):
     '''
     Train an decision tree and write to out_path
     '''
@@ -616,10 +617,16 @@ def train_estimator(support_set, n_samples, x_train, y_train, model_function, ma
     bootstrap_y = y_train.ix[train_inds]
     dt_model = model_function(bootstrap_x, bootstrap_y, max_features)
     importance = dt_model.feature_importances_
-
-    write_decisiontree(dt_model, out_path)
     
-    return dt_model, train_inds, oob_inds, importance
+    oob_x = x_train.ix[oob_inds]
+    oob_y = y_train.ix[oob_inds]
+    oob_metrics = calc_oob_metrics(dt_model, oob_y, oob_x, model_type)
+    
+    joblib.dump(dt_model, out_path)
+    #write_decisiontree(dt_model, out_path)
+    
+    
+    return dt_model, train_inds, oob_inds, importance, oob_metrics
 
 
 def fit_tree_classifier(x_train, y_train, max_features=None):
@@ -693,27 +700,51 @@ def write_model(out_dir, df_sets):
     return df_sets, set_txt
 
 
-def calc_oob_rate(dt, oob_samples, oob_predictors, model_type='classifier'):
+def calc_oob_rate(dt, oob_response, oob_predictors, model_type='classifier'):
     '''
     Return the Out of Bag accuracy rate for the decision tree, dt, and the
-    Out of Bag samples, oob_samples
+    Out of Bag samples, oob_response
     '''
     
     oob_prediction = dt.predict(oob_predictors)
     
     # If the model is a regressor, calculate the R squared
     if model_type.lower() == 'regressor':
-        oob_rate = metrics.r2_score(oob_samples, oob_prediction)
+        oob_rate = metrics.r2_score(oob_response, oob_prediction)
+        oob_rate = int(round(oob_rate * 100, 0))
     
     # Otherwise, get the percent correct
     else:
-        n_correct = len(oob_samples[oob_samples == oob_prediction])
-        n_samples = len(oob_samples)
+        n_correct = len(oob_response[oob_response == oob_prediction])
+        n_samples = len(oob_response)
         oob_rate = int(round(float(n_correct)/n_samples * 100, 0))
     
     return oob_rate
-
-
+    
+    
+def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier'):
+    '''
+    Return the Out of Bag accuracy rate for the decision tree, dt, and the
+    Out of Bag samples, oob_response
+    '''
+    
+    oob_prediction = dt.predict(oob_predictors)
+    oob_metrics = {}
+    # If the model is a regressor, calculate the R squared
+    if model_type.lower() == 'regressor':
+        oob_rate = metrics.r2_score(oob_response, oob_prediction)
+        oob_metrics['oob_rate'] = int(round(oob_rate * 100, 0))
+        oob_metrics['oob_rmse'] = stats_functions.rmse(oob_response, oob_prediction)
+    
+    # Otherwise, get the percent correct
+    else:
+        oob_rate = metrics.accuracy_score(oob_response, oob_prediction)
+        oob_metrics['oob_rate'] = int(round(oob_rate * 100, 0))
+        oob_metrics['oob_kappa'] = metrics.cohen_kappa_score(oob_response, oob_prediction)
+        
+    return oob_metrics
+    
+    
 def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob=0):
     """
     Calculate the out-of-bag accuracy for each support set in `df_sets`
@@ -722,12 +753,16 @@ def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob
     ----------
     df_sets : pandas DataFrame
         DataFrame with support set info
-    df_train : DataFrame of training samples
+    df_train : pandas DataFrame
+        DataFrame of training sample
     oob_dict : dict
-        Dictionary of sample indices indicating which samples are OOB for each support set in 
-    target_col : string of the target column name
-    predict_cols : list-like of string prediction column names
-    min_oob : int minimum OOB score. All sets with OOB score < min_oob will be dropped. Default = 0.
+        Dictionary of sample indices indicating which samples are OOB for each support set in `df_sets`
+    target_col : str
+        string of the target column name
+    predict_cols : list or array-like
+        list-like of string prediction column names
+    min_oob : int
+        minimum OOB score. All sets with OOB score < `min_oob` will be dropped. Default = 0.
     
     Returns
     -------
@@ -737,14 +772,14 @@ def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob
         View of df_sets where OOB rate < `min_oob`
 
     """
-    
-    for i, row in df_sets.iterrows():
-        dt = row.dt_model
-        this_oob = df_train.ix[oob_dict[i]]
-        oob_samples = this_oob[target_col]
-        oob_predictors = this_oob[predict_cols]
-        oob_rate = calc_oob_rate(dt, oob_samples, oob_predictors)
-        df_sets.ix[i, 'oob_rate'] = oob_rate
+    if 'oob_rate' not in df_sets.columns:
+        for i, row in df_sets.iterrows():
+            dt = row.dt_model
+            this_oob = df_train.ix[oob_dict[i]]
+            oob_response = this_oob[target_col]
+            oob_predictors = this_oob[predict_cols]
+            oob_rate = calc_oob_rate(dt, oob_response, oob_predictors)
+            df_sets.ix[i, 'oob_rate'] = oob_rate
     low_oob = df_sets[df_sets.oob_rate < min_oob]
     
     return df_sets, low_oob
@@ -781,9 +816,10 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             with open(row.dt_file) as f:
                 dt = pickle.load(f)
             this_oob = df_train.ix[oob_dict[i]]
-            oob_samples = this_oob[val_col]
+            oob_response = this_oob[val_col]
             oob_predictors = this_oob[var_cols]
-            df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_samples, oob_predictors)#'''
+            df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_response, oob_predictors)#'''
+    del oob_dict
     empty_tiles = []
     for i, (tile_id, t_row) in enumerate(df_tiles.iterrows()):
         t1 = time.time()
@@ -792,14 +828,12 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
         
         rc = df_tiles_rc.ix[tile_id]
         ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[tile_id]
-        t_nrows = lr_r - ul_r
-        t_ncols = lr_c - ul_c
 
         # Get a mask for this tile
         if type(nodata_mask) == np.ndarray:
             tile_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
         else: # Otherwise, it's a path to a shapefile
-            tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, (t_nrows, t_ncols), t_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
+            tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, t_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
             tile_mask = tile_mask != -9999
         # If it's empty, skip and add it to the list
         if not tile_mask.any():
@@ -906,7 +940,7 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
     '''
     t0 = time.time()
     predictors = []
-    for ind, var in enumerate(df_var.ix[['brightness']].index):
+    for ind, var in enumerate(df_var.index):
         #this_tile_ar = np.copy(tile_ar)
         data_band, search_str, basepath, by_tile, path_filter = df_var.ix[var]
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
@@ -914,15 +948,6 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
         if by_tile:
             files = [find_file(basepath, search_str, tile, path_filter) for tile in tile_strs]
             ar_var = mosaic_by_tsa.get_mosaic(mosaic_tx, tile_strs, tile_ar, coords, data_band, set_id, files)
-            if var == 'brightness':
-                ds = gdal.Open(files[0])
-                prj = ds.GetProjection()
-                ds = None
-                driver = gdal.GetDriverByName('envi')
-                this_tx = coords.ul_x, 30, 0, coords.ul_y, 0, -30
-                out_path = '/home/server/pi/homes/shooper/delete.bsq'
-                array_to_raster(ar_var, this_tx, prj, driver, out_path)
-                import pdb; pdb.set_trace()
         else:
             try:
                 this_file = find_file(basepath, search_str, path_filter=path_filter)
@@ -1330,14 +1355,14 @@ def pct_vote(ar, ar_vote, ar_count):
 
 def aggregate_tile(tile_coords, n_tiles, nodata_mask, support_size, agg_stats, prediction_dir, df_sets, nodata, out_dir, file_stamp, tx, prj, ar_tile=None):
     
-    ############################################################################################################################
+    '''############################################################################################################################
     # jdb added 6/22/2017 
     # for testing purposes, skip tiles that have already been aggregated
     path_template = os.path.join(out_dir, 'tile_{0}_*'.format(tile_coords.name))
     #pdb.set_trace()    
     if len(glob.glob(path_template)) != 0:
       print 'Aggregating for %s of %s tiles is already done - skipping...' % (tile_coords.name + 1, n_tiles)
-      return
+      return'''
     
     t0 = time.time()
     print 'Aggregating for %s of %s tiles...' % (tile_coords.name + 1, n_tiles)
@@ -1386,13 +1411,13 @@ def aggregate_tile(tile_coords, n_tiles, nodata_mask, support_size, agg_stats, p
     nans = np.isnan(ar_tile).all(axis=2)
     if 'mean' in agg_stats:
         ar_mean = np.nanmean(ar_tile, axis=2)
-        ar_mean[nans | nodata_mask] = nodata
+        ar_mean[nans | ~nodata_mask] = nodata
         out_path = path_template %  'mean'
         mosaic_by_tsa.array_to_raster(ar_mean, tx, prj, driver, out_path, nodata=nodata, silent=True)
         ar_mean = None
         
     if 'stdv' in agg_stats or 'stdv' in agg_stats:
-        ar_stdv = np.nanstdv(ar_tile, axis=2)
+        ar_stdv = np.nanstd(ar_tile, axis=2)
         ar_stdv[nans | ~nodata_mask] = -9999
         out_path = path_template %  'stdv'
         mosaic_by_tsa.array_to_raster(ar_stdv, tx, prj, driver, out_path, nodata=-9999, silent=True)
@@ -1453,15 +1478,21 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
     # Get feature importances and max importance per set
     t1 = time.time()
     print 'Getting importance values...'
-    importance_list = []
+    importance_per_var = []
+    importance_cols = sorted([c for c in df_sets.columns if 'importance' in c])
     df_sets['max_importance'] = nodata
-    for s, row in df_sets.iterrows():
-        with open(row.dt_file, 'rb') as f: 
-            dt_model = pickle.load(f)
-        max_importance, this_importance = get_max_importance(dt_model)
-        df_sets.ix[s, 'max_importance'] = max_importance
-        importance_list.append(this_importance)
-    importance = np.array(importance_list).mean(axis=0)
+    if len(importance_cols) == 0:
+        # Loop through and get importance
+        for s, row in df_sets.iterrows():
+            with open(row.dt_file, 'rb') as f: 
+                dt_model = pickle.load(f)
+            max_importance, this_importance = get_max_importance(dt_model)
+            df_sets.ix[s, 'max_importance'] = max_importance
+            importance_per_var.append(this_importance)
+        importance = np.array(importance_per_var).mean(axis=0)
+    else:
+        df_sets['max_importance'] = np.argmax(df_sets[importance_cols].values, axis=1)
+        importance = df_sets[importance_cols].mean(axis=0).values
     pct_importance = importance / importance.sum()
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
