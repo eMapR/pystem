@@ -5,8 +5,6 @@ The STEM is an ensemble of locally defined, randomly located, spatially overalpp
 
 [Processing workflow](https://docs.google.com/document/d/1Weg1KNnGq-rMyaGvv3OvbWbYglNOYVOywyK6w3trtyc/edit?usp=sharing)
 
-[Development journal](https://docs.google.com/document/d/1mIKBglvLHEccVvnEJaqJc5o27pPZJT4YOX8K8CMrHbI/edit?usp=sharing)
-
 ![alt text](https://github.com/smHooper/stem/blob/master/misc/sets_medium.jpeg "STEM illustration")
 
 ## References
