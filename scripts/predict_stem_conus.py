@@ -9,6 +9,7 @@ import glob
 import time
 import os
 import sys
+import subprocess
 import shutil
 import warnings
 import pandas as pd
@@ -83,13 +84,35 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     if not os.path.exists(mosaic_path):
         sys.exit('mosaic_path does not exist:\n%s' % mosaic_path)
     
+    
+    predict_dir = os.path.join(out_dir, 'decisiontree_predictions')
+    if not os.path.exists(predict_dir):
+        os.mkdir(predict_dir)
+    
+    set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
+    #set_txt = '/vol/v1/general_files/user_files/samh/pecora/imperv_maps/urban_sets.txt'
+    # if subset_shp, get just overlapping sets
+    df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
+
     if mosaic_path.endswith('.shp'):
+        if 'subset_shp' in inputs:
+            '''out_shp_bn = os.path.basename(mosaic_path).replace('.shp', '_clipped.shp')
+            out_shp = os.path.join(out_dir, out_shp_bn)
+            cmd = 'ogr2ogr -skipfailures -clipsrc {clip_shp} {out_shp} {in_shp}'.format(clip_shp=subset_shp, out_shp=out_shp, in_shp=mosaic_path)
+            subprocess.call(cmd, shell=True)'''
+            
+            mosaic_path = subset_shp
         mosaic_type = 'vector'
         if 'resolution' not in inputs:
             warnings.warn('Resolution not specified. Using default of 30...\n')
         mosaic_dataset = ogr.Open(mosaic_path)
         mosaic_ds = mosaic_dataset.GetLayer()
         min_x, max_x, min_y, max_y = mosaic_ds.GetExtent()
+        if 'subset_shp' in inputs:
+            mosaic_geom = ogr.Geometry(ogr.wkbMultiPolygon)
+            for feature in mosaic_ds:
+                mosaic_geom.AddGeometry(feature.GetGeometryRef())
+            df_sets = stem_conus.get_overlapping_sets(df_sets, mosaic_geom)
         xsize = int((max_x - min_x)/resolution)
         ysize = int((max_y - min_y)/resolution)
         prj = mosaic_ds.GetSpatialRef().ExportToWkt()
@@ -114,19 +137,12 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     # If number of tiles not given, need to set it
     if 'n_tiles' not in inputs:
         print 'n_tiles not specified. Using default: 25 x 15 ...\n'
-        n_tiles = 25, 15
+        n_tiles = 90, 40
     else:
         n_tiles = [int(i) for i in n_tiles.split(',')]
     df_tiles, df_tiles_rc, tile_size = stem_conus.get_tiles(n_tiles, xsize, ysize, mosaic_tx)
-        
-    predict_dir = os.path.join(out_dir, 'decisiontree_predictions')
-    if not os.path.exists(predict_dir):
-        os.mkdir(predict_dir)
     
-    set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
-    df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     total_sets = len(df_sets)
-    
     t0 = time.time()
     if 'n_jobs_pred' in inputs:
         n_jobs = int(n_jobs_pred)
@@ -156,6 +172,8 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             
             # Build list of args to pass to the Pool
             #tsa_off = stem_conus.calc_offset((mosaic_tx[0], mosaic_tx[3]), (tx_out[0], tx_out[3]), tx_out)
+            if os.path.exists(os.path.join(predict_dir, 'prediction_%s.tif' % set_id)):
+                continue
             args.append([coords, mosaic_type, mosaic_path, mosaic_tx, prj, nodata, c, total_sets, set_id, df_var, xsize, ysize, row.dt_file, nodata, np.uint8, constant_vars, predict_dir])
             
             #args.append([c, total_sets, set_id, df_var, set_mosaic_path, tsa_off, coords, 
@@ -164,6 +182,8 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         print '%.1f minutes\n' % ((time.time() - t1)/60)
         p = Pool(n_jobs)
         p.map(stem_conus.par_predict, args, 1)
+        p.close()
+        p.join()
 
     else:
         # Loop through each set and generate predictions
@@ -202,15 +222,15 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     
     ########################################################################################################################################
     # jdb 6/22/17 check for sets that errored - if there are any, remove them from the df_sets DF so that the aggregation step doesn't expect them
-    setErrorLog = os.path.dirname(predict_dir)+'/predication_errors.txt'    
-    if os.path.isfile(setErrorLog):   
-      with open(setErrorLog) as f:
-        lines = f.readlines()
-    
-      badSets = [int(line.split(':')[1].rstrip().strip()) for line in lines if 'set_id' in line]
-      for thisSet in badSets:
-        df_sets = df_sets[df_sets.index != thisSet]
-    ########################################################################################################################################  
+    '''if len(df_sets) != len(glob.glob(os.path.join(predict_dir, '*prediction*.tif'))):
+        setErrorLog = os.path.dirname(predict_dir)+'/prediction_errors.txt'    
+        if os.path.isfile(setErrorLog):   
+          with open(setErrorLog) as f:
+            lines = f.readlines()
+        
+          badSets = [int(line.split(':')[1].rstrip().strip()) for line in lines if 'set_id' in line]
+          df_sets.drop(badSets, inplace=True)'''
+    ######################################################################################################################################## 
     
     pct_importance, df_sets = stem_conus.aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, mosaic_tx, support_size, agg_stats, predict_dir, df_sets, out_dir, file_stamp, prj, driver, n_jobs_agg)
     #print 'Total aggregation time: %.1f hours\n' % ((time.time() - t0)/3600)

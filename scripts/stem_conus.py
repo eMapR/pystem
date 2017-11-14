@@ -218,9 +218,9 @@ def sample_gsrd_cell(n, cell_bounds, x_size, y_size, x_res, y_res, tx, snap_coor
     lr_y_ls = [int(round(y + ((y_size/2 - y_remain) * y_res_sign), 0)) for y in y_centers]
 
     # Store coords for each support set in a dataframe
-    these_bounds = zip(ul_x_ls, ul_y_ls, lr_x_ls, lr_y_ls, x_centers, y_centers)
+    set_bounds = zip(ul_x_ls, ul_y_ls, lr_x_ls, lr_y_ls, x_centers, y_centers)
     columns = ['ul_x', 'ul_y', 'lr_x', 'lr_y', 'ctr_x', 'ctr_y']
-    df = pd.DataFrame(these_bounds, columns=columns)
+    df = pd.DataFrame(set_bounds, columns=columns)
     
     return df
 
@@ -304,10 +304,12 @@ def coords_to_shp(df, prj_shp, out_shp):
     ds_prj = ogr.Open(prj_shp)
     lyr_prj = ds_prj.GetLayer()
     srs = lyr_prj.GetSpatialRef()
+    driver = ds_prj.GetDriver()
     ds_prj.Destroy()
     
     # Create output datasource
-    driver = ogr.GetDriverByName('ESRI Shapefile')
+    #driver = ogr.GetDriverByName('ESRI Shapefile')
+    
     #out_shp = os.path.join(out_dir, 'gsrd.shp')
     if os.path.exists(out_shp):
         driver.DeleteDataSource(out_shp)
@@ -319,7 +321,14 @@ def coords_to_shp(df, prj_shp, out_shp):
     # Add coord fields
     cols = df.columns
     for c in cols:
-        out_lyr.CreateField(ogr.FieldDefn(c, ogr.OFTInteger))
+        dtype = str(df[c].dtype).lower()
+        if 'int' in dtype: out_lyr.CreateField(ogr.FieldDefn(c, ogr.OFTInteger))
+        elif 'float' in dtype: out_lyr.CreateField(ogr.FieldDefn(c, ogr.OFTReal))
+        else: # It's a string
+            width = df[c].apply(len).max() + 10
+            field = ogr.FieldDefn(c, ogr.OFTString)
+            field.SetWidth(width)
+            out_lyr.CreateField(field)
     out_lyr.CreateField(ogr.FieldDefn('id', ogr.OFTInteger))
     lyr_def = out_lyr.GetLayerDefn()
     
@@ -340,6 +349,7 @@ def coords_to_shp(df, prj_shp, out_shp):
         ring.AddPoint(lr_x, ul_y) #ur vertex
         ring.AddPoint(lr_x, lr_y) #lr vertex
         ring.AddPoint(ul_x, lr_y) #ll vertex
+        ring.AddPoint(ul_x, ul_y) #close ring
         poly = ogr.Geometry(ogr.wkbPolygon)
         poly.AddGeometry(ring)
         feat.SetGeometry(poly)
@@ -460,7 +470,7 @@ def plot_sets_on_shp(ds_coords, max_size, df_sets, support_size, out_dir=None, f
             plt.text(r.ctr_x, r.ctr_y, str(ind), ha='center')
 
     if out_dir:
-        plt.savefig(os.path.join(out_dir, 'support_sets.png'))
+        plt.savefig(os.path.join(out_dir, 'support_sets.png'), dpi=300)
     else:
         plt.show()
 
@@ -554,46 +564,50 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
     return df_sets
     
 
-def find_file(basepath, search_str, tsa_str=None, path_filter=None):
+def find_file(basepath, search_str, tile_str=None, path_filter=None):
     '''
-    Return the full path within the directory tree /basepath/tsa_str if search_str
+    Return the full path within the directory tree /basepath/tile_str if search_str
     is in the filename. Optionally, if path_filter is specified, only a path that
     contains path_filter will be returned.
     '''
     if not os.path.exists(basepath):
         sys.exit('basepath does not exist: \n%s' % basepath)
      
-    if tsa_str: 
-        bp = os.path.join(basepath, tsa_str)
+    if tile_str: 
+        '''bp = os.path.join(basepath, tile_str)
         if not os.path.isdir(bp):
             exists = False
             # Try adding leading zeros and check for an existing direcoty
             for i in range(10):
-                tsa_str = '0' + tsa_str
-                bp = os.path.join(basepath, tsa_str)
+                tile_str = '0' + tile_str
+                bp = os.path.join(basepath, tile_str)
                 if os.path.isdir(bp):
                     exists = True
                     break
             if not exists:
-                raise IOError(('Cannot find tile directory with basepath %s and'+\
-                'tile_str %s or up to 10 leading zeros') % (basepath, tsa_str))
+                raise IOError(('Cannot find tile directory with basepath %s '+\
+                'and tile_str %s or up to 10 leading zeros') % (basepath, tile_str))#'''
 
         # Search the bp directory tree. If search_str is in a file, get the full path.
+        tile_str = ('0000' + tile_str)[-4:]
         paths = []
-        for root, dirs, files in os.walk(bp, followlinks=True):
-            these_paths = [os.path.join(root, f) for f in files]
-            these_paths = fnmatch.filter(these_paths, search_str)
+        for root, dirs, files in os.walk(basepath, followlinks=True):
+            if not os.path.basename(root) == tile_str:
+                continue
+            #these_paths = [os.path.join(root, f) for f in files]
+            these_paths = [os.path.join(root, f) for f in fnmatch.filter(files, search_str)]
             paths.extend(these_paths)
+
     else:
         paths = glob.glob(os.path.join(basepath, search_str))
         
     # If path filter is specified, remove any paths that contain it
-    if not path_filter == '':
+    if not path_filter == '' and type(path_filter) == str:
         [paths.remove(p) for p in paths if fnmatch.fnmatch(p, path_filter)]
         #paths = [p for p in paths if fnmatch.fnmatch(p, path_filter)]
     
     '''if len(paths) > 1:
-        print 'Multiple files found for tsa: ' + tsa_str
+        print 'Multiple files found for tsa: ' + tile_str
         for p in paths:
             print p
         print 'Selecting the first one found...\n'# '''
@@ -602,7 +616,7 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
     if len(paths) < 1:
         #pdb.set_trace()
         sys.exit(('No files found for tsa {0} with basepath {1} and ' +\
-        'search_str {2}\n').format(tsa_str, basepath, search_str))
+        'search_str {2}\n').format(tile_str, basepath, search_str))
     
     return paths[0]
 
@@ -622,8 +636,8 @@ def train_estimator(support_set, n_samples, x_train, y_train, model_function, mo
     oob_y = y_train.ix[oob_inds]
     oob_metrics = calc_oob_metrics(dt_model, oob_y, oob_x, model_type)
     
-    joblib.dump(dt_model, out_path)
-    #write_decisiontree(dt_model, out_path)
+    #joblib.dump(dt_model, out_path)
+    write_decisiontree(dt_model, out_path)
     
     
     return dt_model, train_inds, oob_inds, importance, oob_metrics
@@ -785,7 +799,7 @@ def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob
     return df_sets, low_oob
 
 
-def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_dict, df_sets, df_train, val_col, var_cols, out_dir, file_stamp, prj, driver):
+def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_dict, df_sets, df_train, val_col, var_cols, out_dir, file_stamp, prj, driver, oob_metric='oob_rate'):
     
     t0 = time.time()
     
@@ -795,16 +809,6 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
     set_ncols = support_size[1]/res
     df_tiles, df_tiles_rc, tile_size = get_tiles(n_tiles, xsize, ysize, tx)
     total_tiles = len(df_tiles)
-    
-    # Find the tiles that have only nodata values
-    '''t1 = time.time()
-    print '\nFinding empty tiles...'
-    empty_tiles = find_empty_tiles(df_tiles, nodata_mask, tx)
-    # Select only tiles that are not empty
-    df_tiles = df_tiles.select(lambda x: x not in empty_tiles)
-    total_tiles = len(df_tiles)
-    print '%s empty tiles found of %s total tiles\n' %\
-    (len(empty_tiles), total_tiles)'''
     
     # Make directory for storing tiles 
     tile_dir = os.path.join(out_dir, 'oob_tiles_temp')
@@ -819,9 +823,10 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             oob_response = this_oob[val_col]
             oob_predictors = this_oob[var_cols]
             df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_response, oob_predictors)#'''
+            oob_metric = 'oob_rate'
     del oob_dict
     empty_tiles = []
-    for i, (tile_id, t_row) in enumerate(df_tiles.iterrows()):
+    for i, (tile_id, tile_coords) in enumerate(df_tiles.iterrows()):
         t1 = time.time()
         print 'Aggregating for %s of %s tiles' % (i + 1, total_tiles)
         print 'Tile index: ', tile_id
@@ -833,7 +838,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
         if type(nodata_mask) == np.ndarray:
             tile_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
         else: # Otherwise, it's a path to a shapefile
-            tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, t_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
+            tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, tile_coords[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
             tile_mask = tile_mask != -9999
         # If it's empty, skip and add it to the list
         if not tile_mask.any():
@@ -843,18 +848,22 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
 
         # Calculate the size of this tile in case it's at the edge where the
         #   tile size will be slightly different
-        this_size_xy = abs(t_row.lr_y - t_row.ul_y), abs(t_row.lr_x - t_row.ul_x)
-        df_these_sets = get_overlapping_sets(df_sets, t_row, this_size_xy, support_size)
+        wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}, {0} {1}))'.format(tile_coords.ul_x, tile_coords.ul_y, tile_coords.lr_x, tile_coords.lr_y)
+        tile_geom = ogr.CreateGeometryFromWkt(wkt)
+        tile_geom.CloseRings()
+        overlapping_sets = get_overlapping_sets(df_sets, tile_geom)
+        #this_size_xy = abs(tile_coords.lr_y - tile_coords.ul_y), abs(tile_coords.lr_x - tile_coords.ul_x)
+        #overlapping_sets = get_overlapping_sets(df_sets, tile_coords, this_size_xy, support_size)
         
         this_size = rc.lr_r - rc.ul_r, rc.lr_c - rc.ul_c
-        n_sets = len(df_these_sets)
-        tile_ul = t_row[['ul_x','ul_y']]
+        n_sets = len(overlapping_sets)
+        tile_ul = tile_coords[['ul_x','ul_y']]
         
         print n_sets, ' Overlapping sets'
         t2 = time.time()
         oob_rates = []
         oob_bands = []
-        for s_ind, s_row in df_these_sets.iterrows():
+        for s_ind, s_row in overlapping_sets.iterrows():
             #set_coords = s_row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
             # Fill a band for this array
             offset = calc_offset(tile_ul, (s_row.ul_x, s_row.ul_y), tx)
@@ -874,7 +883,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             except:
                 import pdb; pdb.set_trace()
             oob_bands.append(oob_band)
-            oob_rates.append(s_row.oob_rate)
+            oob_rates.append(s_row[oob_metric])
          
         print 'Average OOB: ', int(np.mean(oob_rates))
         print 'Filling tiles: %.1f seconds' % ((time.time() - t2))
@@ -888,15 +897,15 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
         this_oob[nans] = nodata
         this_cnt[nans] = nodata
         path_template = os.path.join(tile_dir, 'tile_%s_%s.tif')
-        this_tx = t_row.ul_x, tx[1], tx[2], t_row.ul_y, tx[4], tx[5]
-        mosaic_by_tsa.array_to_raster(this_oob, this_tx, prj, driver, path_template % (tile_id, 'oob'), nodata=nodata, silent=True)
+        this_tx = tile_coords.ul_x, tx[1], tx[2], tile_coords.ul_y, tx[4], tx[5]
+        mosaic_by_tsa.array_to_raster(this_oob, this_tx, prj, driver, path_template % (tile_id, oob_metric), nodata=nodata, silent=True)
         mosaic_by_tsa.array_to_raster(this_cnt, this_tx, prj, driver, path_template % (tile_id, 'count'), nodata=nodata, silent=True)
         print 'Aggregating: %.1f minutes' % ((time.time() - t2)/60)
         print 'Total time for this tile: %.1f minutes\n' % ((time.time() - t1)/60)
         
     # For count and oob, stitch tiles back together
     avg_dict = {}
-    for stat in ['oob', 'count']: 
+    for stat in [oob_metric, 'count']: 
         ar = np.full((ysize, xsize), nodata, dtype=np.uint8)
         for tile_id, tile_coords in df_tiles.iterrows():
             if tile_id in empty_tiles:
@@ -940,18 +949,18 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
     '''
     t0 = time.time()
     predictors = []
-    for ind, var in enumerate(df_var.index):
+    for var, info in df_var.iterrows():
         #this_tile_ar = np.copy(tile_ar)
-        data_band, search_str, basepath, by_tile, path_filter = df_var.ix[var]
-        if constant_vars: search_str = search_str.format(constant_vars['YEAR'])
+    
+        if constant_vars: search_str = info.search_str.format(constant_vars['YEAR'])
         
-        if by_tile:
-            files = [find_file(basepath, search_str, tile, path_filter) for tile in tile_strs]
-            ar_var = mosaic_by_tsa.get_mosaic(mosaic_tx, tile_strs, tile_ar, coords, data_band, set_id, files)
+        if info.by_tile:
+            files = [find_file(info.basepath, info.search_str, tile, info.path_filter) for tile in tile_strs]
+            ar_var = mosaic_by_tsa.get_mosaic(mosaic_tx, tile_strs, tile_ar, coords, info.data_band, set_id, files)
         else:
             try:
-                this_file = find_file(basepath, search_str, path_filter=path_filter)
-                tx_, ar_var, roff_, coff_ = mosaic_by_tsa.get_array(this_file, data_band, coords)
+                this_file = find_file(info.basepath, info.search_str, path_filter=info.path_filter)
+                tx_, ar_var, roff_, coff_ = mosaic_by_tsa.get_array(this_file, info.data_band, coords)
             except:
                 exc_type, exc_msg, _ = sys.exc_info()
                 exc_type_str = str(exc_type).split('.')[-1].replace("'", '').replace('>', '')
@@ -989,6 +998,7 @@ def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, 
     # Get the ids of TSAs this kernel covers
     tile_ids = np.unique(tile_ar)
     tile_strs = [str(t) for t in tile_ids if t != nodata]
+    #import pdb; pdb.set_trace()
     array_shape = tile_ar.shape
 
     # Get an array of predictors where each column is a flattened 2D array of a
@@ -1028,8 +1038,13 @@ def par_predict(args):
     mosaic_ds = None
     tx_out = coords.ul_x, mosaic_tx[1], mosaic_tx[2], coords.ul_y, mosaic_tx[4], mosaic_tx[5]
     
-    with open(dt_file, 'rb') as f: 
-        dt_model = pickle.load(f)
+    # Flexibly handle both standard pickled DTs and those pickled using joblib
+    try:
+        with open(dt_file, 'rb') as f: 
+            dt_model = pickle.load(f)
+    except:
+        dt_model = joblib.load(dt_file)
+        
     try:
         tile_mask = tile_ar == 0
         tile_ar[tile_mask] = nodata
@@ -1061,7 +1076,7 @@ def par_predict(args):
         
     except:
         print 'problem with set_count: ', set_count, 'set_id: ', set_id
-        errorLog = os.path.dirname(predict_dir)+'/predication_errors.txt'       
+        errorLog = os.path.dirname(predict_dir)+'/prediction_errors.txt'       
         if not os.path.isfile(errorLog):                 
             with open(errorLog, 'w') as el:       
                 el.write('set_count: '+str(set_count)+'\n')
@@ -1076,7 +1091,8 @@ def par_predict(args):
         #sys.exit(traceback.print_exception(*sys.exc_info()))
     
     print 'Total time for set %s of %s: %.1f minutes' % (set_count + 1, total_sets, (time.time() - t0)/60)
-        
+
+
 
 def get_tiles(n_tiles, xsize, ysize, tx=None):
     '''
@@ -1124,7 +1140,24 @@ def get_tiles(n_tiles, xsize, ysize, tx=None):
     return df_prj, df_rc, (tile_rows, tile_cols)
 
 
-def get_overlapping_sets(df_sets, tile_bounds, tile_size, support_size, resolution=30):
+def get_overlapping_sets(support_sets, geometry):
+    
+    overlapping = []
+    for set_id, row in support_sets.iterrows():
+        
+        wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}, {0} {1}))'.format(row.ul_x, row.ul_y, row.lr_x, row.lr_y)
+        set_geom = ogr.CreateGeometryFromWkt(wkt)
+        set_geom.CloseRings()
+        
+        if set_geom.Intersects(geometry):
+            overlapping.append(set_id)
+    
+    return support_sets.ix[overlapping]
+        
+        
+
+
+"""def get_overlapping_sets(df_sets, tile_bounds, tile_size, support_size, resolution=30):
     '''
     Return a dataframe of support sets that overlap the tile defined by
     tile bounds
@@ -1144,7 +1177,7 @@ def get_overlapping_sets(df_sets, tile_bounds, tile_size, support_size, resoluti
     overlap = df_sets[(x_dif < max_x_dist) & (y_dif < max_y_dist)]
     #import pdb; pdb.set_trace()
     
-    return overlap
+    return overlap"""
 
 
 def calc_offset(ul_xy1, ul_xy2, tx):
@@ -1374,17 +1407,20 @@ def aggregate_tile(tile_coords, n_tiles, nodata_mask, support_size, agg_stats, p
     tile_rows = (tile_coords.lr_y - tile_coords.ul_y) / y_res
     tile_cols = (tile_coords.lr_x - tile_coords.ul_x) / x_res
     tile_size = tile_rows, tile_cols
-    df_these_sets = get_overlapping_sets(df_sets, tile_coords, tile_size, support_size)
-    n_sets = len(df_these_sets)
+    wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}, {0} {1}))'.format(tile_coords.ul_x, tile_coords.ul_y, tile_coords.lr_x, tile_coords.lr_y)
+    tile_geom = ogr.CreateGeometryFromWkt(wkt)
+    tile_geom.CloseRings()
+    overlapping_sets = get_overlapping_sets(df_sets, tile_geom)
+    n_sets = len(overlapping_sets)
     
     # Load overlapping predictions from disk and read them as arrays
     tile_ul = tile_coords[['ul_x','ul_y']]
-    predictions = load_predictions(prediction_dir, df_these_sets, tile_ul, tile_size)
+    predictions = load_predictions(prediction_dir, overlapping_sets, tile_ul, tile_size)
     
     print n_sets, ' Overlapping sets'
     pred_bands = []
     importance_bands = []
-    for s_ind in df_these_sets.index:
+    for s_ind in overlapping_sets.index:
         
         # Fill tile with prediction
         ar_pred, tile_inds = predictions[s_ind]
@@ -1471,7 +1507,9 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
     
     #mosaic_ds = gdal.Open(mosaic_path)
     df_tiles, df_tiles_rc, tile_size = get_tiles(n_tiles, xsize, ysize, tx)
-    #coords_to_shp(df_tiles, '/vol/v2/stem/conus_testing/models/landcover_20170419_1443/gsrd_sets.shp', '/vol/v2/stem/conus_testing/models/landcover_20170419_1443/ag_tiles.shp')
+    #df_tiles = pd.read_csv('/vol/v1/general_files/user_files/samh/pecora/imperv_maps/urban_tiles.txt', sep='\t')
+    #df_tiles_rc = pd.read_csv('/vol/v1/general_files/user_files/samh/pecora/imperv_maps/urban_tiles_rc.txt', sep='\t')
+
     n_tiles = len(df_tiles)
     df_tiles['tile'] = df_tiles.index
     
@@ -1502,11 +1540,12 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
     if not os.path.exists(tile_dir):
         os.mkdir(tile_dir)
     # Loop through each tile
+
     args = []
     empty_tiles = []
     for ind, tile_coords in df_tiles.iterrows():
         tx_tile = tile_coords.ul_x, x_res, x_rot, tile_coords.ul_y, y_rot, y_res
-        ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[ind]
+        ul_r, lr_r, ul_c, lr_c = df_tiles_rc.ix[ind, ['ul_r', 'lr_r', 'ul_c', 'lr_c']]
         # if running in parallel, add to list of args
         # Get a mask for this tile
         if type(nodata_mask) == np.ndarray:
@@ -1517,6 +1556,7 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
             tile_mask = tile_mask != -9999
            
         # If it's empty, skip and add it to the list
+        
         if not tile_mask.any():
             empty_tiles.append(ind)
             print 'Skipping tile %s of %s because it contains only nodata values...\n' % (ind + 1, n_tiles)
@@ -1524,6 +1564,7 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
         if n_jobs:
             args.append([tile_coords, n_tiles, tile_mask, support_size, agg_stats, prediction_dir,
                          df_sets, nodata, tile_dir, file_stamp, tx_tile, prj])
+
         # Otherwise, just aggregate for this tile
         else:
             try:
@@ -1554,7 +1595,8 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
                 continue
             tile_rows = (tile_coords.lr_y - tile_coords.ul_y) / y_res
             tile_cols = (tile_coords.lr_x - tile_coords.ul_x) / x_res
-            tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_id, stat))
+            #tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_id, stat))
+            tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_coords.name, stat))
             ds = gdal.Open(tile_file)
             ar_tile = ds.ReadAsArray()
             t_ulx = tile_coords[['ul_x', 'ul_y']]
