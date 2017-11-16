@@ -475,7 +475,7 @@ def plot_sets_on_shp(ds_coords, max_size, df_sets, support_size, out_dir=None, f
         plt.show()
 
 
-def tx_from_shp(shp, x_res, y_res):
+def tx_from_shp(shp, x_res, y_res, snap_coord=None):
     ''' Return a GeoTransform of a shapefile if it were rasterized '''
     
     ds = ogr.Open(shp)
@@ -492,6 +492,15 @@ def tx_from_shp(shp, x_res, y_res):
     else:
         ul_y = max_y
     
+    if snap_coord:
+        snap_x, snap_y = snap_coord
+        # Find distance to closest raster cell
+        x_snap_dist = ul_x % x_res - snap_x %  x_res
+        y_snap_dist = ul_y % y_res - snap_y % y_res
+        # Subtract from ul coord
+        ul_x -= x_snap_dist * (-x_res/x_res)
+        ul_y -= y_snap_dist * (-y_res/y_res)
+        
     tx = ul_x, x_res, 0, ul_y, 0, y_res
     
     return tx, (min_x, max_x, min_y, max_y)

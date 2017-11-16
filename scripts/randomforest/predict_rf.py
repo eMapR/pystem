@@ -96,7 +96,9 @@ def main(params, n_pieces=False, ydims=None, constant_vars=None, year='', agg_me
             '\nCheck that all predictors for used in var_txt to train the model are in this var_txt ' +\
             '\nPath of Random Forest model: {2}\nPath of var_txt: {3}').format(n_features, n_vars, rf_path, var_txt))
         #"""
-
+    if 'agg_method' in inputs:
+        agg_method = inputs['agg_method']
+        
     # Get mask and raster info
     ds = gdal.Open(mask_path)
     ar = ds.ReadAsArray()
@@ -113,33 +115,7 @@ def main(params, n_pieces=False, ydims=None, constant_vars=None, year='', agg_me
     #print 'Predicting with %s processors... %s' % (rf_model.n_jobs, time.ctime(time.time()))
     t1 = time.time()
     predict_pieces = []
-    
-    '''if n_pieces:
-        # assumes predictors all line up and have same dimensions
-        if 'mask_path' not in inputs: 
-            raise NameError('mask_path not specified')
-        # Figure out the y dimension of each piece
-        n_pieces = int(n_pieces)
-        piece_ysize = ysize/n_pieces
-        upper_ydim = range(0, ysize, piece_ysize)
-        lower_ydim = range(piece_ysize, ysize, piece_ysize)
-        lower_ydim[-1] = ysize
-        ydims = zip(upper_ydim, lower_ydim)
-        
-        for i, yd in enumerate(ydims):
-            print 'Predicting for piece %s of %s...' % (i + 1, n_pieces)
-            t1 = time.time()
-            ar_predictors, nodata_mask = forest.get_predictors(df_var, nodata, yd, constant_vars)
-            t2 = time.time()
-            predictions = rf_model.predict(ar_predictors)
-            print 'Prediction time: %.1f minutes' % ((time.time() - t2)/60)
-            ar_prediction = np.full(nodata_mask.shape[0], nodata, dtype=np.uint8)
-            ar_prediction[nodata_mask] = (predictions * 100).astype(np.uint8)
-            predict_pieces.append(ar_prediction)
-            print 'Total time for this piece: %.1f minutes\n' % ((time.time() - t1)/60)
-            del ar_predictors, nodata_mask, ar_prediction
-        ar_prediction = np.concatenate(predict_pieces)
-        del predict_pieces'''
+
     
     if 'n_tiles' not in inputs:
         print 'n_tiles not specified. Using default: 25 x 15 ...\n'
@@ -149,7 +125,6 @@ def main(params, n_pieces=False, ydims=None, constant_vars=None, year='', agg_me
         
     if 'n_tiles' in inputs:
         df_tiles, df_tiles_rc, tile_size = stem.get_tiles(n_tiles, xsize, ysize, tx)
-        stem.coords_to_shp(df_tiles, '/vol/v2/stem/extent_shp/CAORWA.shp', os.path.join(out_dir, 'tile.shp'))
         empty_tiles = []
         ar_out = np.full((ysize, xsize), nodata, dtype=np.uint8)
         tile_dir = os.path.join(out_dir, 'predict_tiles')
@@ -167,7 +142,8 @@ def main(params, n_pieces=False, ydims=None, constant_vars=None, year='', agg_me
             tsa_ar[tsa_mask] = nodata
             # Get the ids of TSAs this kernel covers
             tsa_ids = np.unique(tsa_ar)
-            tsa_strs = ['0' + str(tsa) for tsa in tsa_ids if tsa!=nodata]
+            #tsa_strs = ['0' + str(tsa) for tsa in tsa_ids if tsa!=nodata]
+            tsa_strs = [str(tsa) for tsa in tsa_ids if tsa!=nodata]
             array_shape = tsa_ar.shape
         
             # Get an array of predictors where each column is a flattened 2D array of a
@@ -243,7 +219,7 @@ def main(params, n_pieces=False, ydims=None, constant_vars=None, year='', agg_me
 
     # Save the prediction array to disk
     stamp = os.path.basename(out_dir)
-    out_path = os.path.join(out_dir, '%s_rf_mean.tif' % stamp)
+    out_path = os.path.join(out_dir, '%s_rf_vote.tif' % stamp)
     #ar_prediction = ar_prediction.reshape(ysize, xsize)
     if constant_vars: 
         out_path = out_path.replace('.tif', '_yr%s.tif' % year )
@@ -319,6 +295,8 @@ def main(params, n_pieces=False, ydims=None, constant_vars=None, year='', agg_me
             ' This model will not be evaluated...'
 
     print '\nTotal runtime: %.1f minutes' % ((time.time() - t0)/60)
+    
+    return out_path
 
 
 if __name__ == '__main__':

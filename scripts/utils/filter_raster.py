@@ -12,6 +12,7 @@ import numpy as np
 from osgeo import gdal, gdalnumeric
 from multiprocessing import Pool
 from scipy import ndimage as ndi
+
 from stem import get_tiles, find_empty_tiles, mode, coords_to_shp
 from mosaic_by_tsa import array_to_raster
 
@@ -127,6 +128,7 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     if 'n_jobs' in inputs: n_jobs = int(inputs['n_jobs'])
     if 'n_tiles' in inputs: n_tiles = [int(n) for n in inputs['n_tiles'].split(',')]
     if 'nodata' in inputs: nodata = int(inputs['nodata'])
+    if 'kernel_type' in inputs: kernel_type = inputs['kernel_type']
     
     extra_args = () # The default for ndi.generic_filter 'extra_args' is an empty tuple
     if 'average' in function.lower():
@@ -151,7 +153,7 @@ def main(params, n_tiles=(25, 15), n_jobs=20, kernel_type='circle', filter_value
     out_dir = os.path.dirname(out_path)
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
-    shutil.copy2(params, out_dir)
+    # shutil.copy2(params, out_dir) # don't need to copy because params are written to meta
         
     print '\nReading input raster...\n'
     t1 = time.time()

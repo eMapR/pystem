@@ -18,7 +18,7 @@ from osgeo import gdal, ogr, gdal_array
 from multiprocessing import Pool
 import numpy as np
 
-import stem_conus
+import stem
 import mosaic_by_tsa as mosaic
 from lthacks import get_min_numpy_dtype, attributes_to_df
     
@@ -36,7 +36,7 @@ def parse_constant_vars(constant_vars):
 
     
 def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs_pred=0, n_jobs_agg=0, mosaic_nodata=0, snap_coord=None, overwrite_sets=False):
-    inputs, df_var = stem_conus.read_params(params)
+    inputs, df_var = stem.read_params(params)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])    
     df_var.data_band = [int(b) for b in df_var.data_band]#sometimes read as float
@@ -52,7 +52,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     
     # Check that all the variables given were used in training and vice versa
     try:
-        train_inputs, train_vars = stem_conus.read_params(train_params)
+        train_inputs, train_vars = stem.read_params(train_params)
     except:
         raise NameError('train_params not specified or does not exist')
     train_vars = sorted(train_vars.index)
@@ -111,7 +111,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             mosaic_geom = ogr.Geometry(ogr.wkbMultiPolygon)
             for feature in mosaic_ds:
                 mosaic_geom.AddGeometry(feature.GetGeometryRef())
-            df_sets = stem_conus.get_overlapping_sets(df_sets, mosaic_geom)
+            df_sets = stem.get_overlapping_sets(df_sets, mosaic_geom)
         xsize = int((max_x - min_x)/resolution)
         ysize = int((max_y - min_y)/resolution)
         prj = mosaic_ds.GetSpatialRef().ExportToWkt()
@@ -122,7 +122,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         if 'snap_coord' in train_inputs:
             snap_coord = train_inputs['snap_coord'].replace('"','')
             snap_coord = [float(c) for c in snap_coord.split(',')]#'''
-        mosaic_tx, extent = stem_conus.tx_from_shp(mosaic_path, x_res, y_res, snap_coord=snap_coord)
+        mosaic_tx, extent = stem.tx_from_shp(mosaic_path, x_res, y_res, snap_coord=snap_coord)
     
     else:
         mosaic_type = 'raster'
@@ -141,7 +141,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         n_tiles = 90, 40
     else:
         n_tiles = [int(i) for i in n_tiles.split(',')]
-    df_tiles, df_tiles_rc, tile_size = stem_conus.get_tiles(n_tiles, xsize, ysize, mosaic_tx)
+    df_tiles, df_tiles_rc, tile_size = stem.get_tiles(n_tiles, xsize, ysize, mosaic_tx)
     
     total_sets = len(df_sets)
     t0 = time.time()
@@ -161,7 +161,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
 
         print '%.1f minutes\n' % ((time.time() - t1)/60)
         p = Pool(n_jobs)
-        p.map(stem_conus.par_predict, args, 1)
+        p.map(stem.par_predict, args, 1)
         p.close()
         p.join()
 
@@ -173,7 +173,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
                 dt_model = pickle.load(f)
             print '\nPredicting for set %s of %s' % (c + 1, total_sets)
             coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-            ar_predict = stem_conus.predict_set(set_id, df_var, mosaic_ds, coords, 
+            ar_predict = stem.predict_set(set_id, df_var, mosaic_ds, coords, 
                                      mosaic_tx, xsize, ysize, dt_model, nodata,
                                      np.int16, constant_vars)        
             tx = coords.ul_x, x_res, x_rot, coords.ul_y, y_rot, y_res
@@ -209,7 +209,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
           badSets = [int(line.split(':')[1].rstrip().strip()) for line in lines if 'set_id' in line]
           df_sets.drop(badSets, inplace=True)#'''
     
-    pct_importance, df_sets = stem_conus.aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, mosaic_tx, support_size, agg_stats, predict_dir, df_sets, out_dir, file_stamp, prj, driver, n_jobs_agg)
+    pct_importance, df_sets = stem.aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, mosaic_tx, support_size, agg_stats, predict_dir, df_sets, out_dir, file_stamp, prj, driver, n_jobs_agg)
     mosaic_ds = None
     mosaic_dataset = None
     

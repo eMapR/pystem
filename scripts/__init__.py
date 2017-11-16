@@ -5,7 +5,7 @@ Created on Thu Nov 16 11:19:00 2017
 @author: shooper
 """
 
-import sys, os
+import sys, os, warnings
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(this_dir)
@@ -17,15 +17,18 @@ for name in os.listdir(this_dir):
 try:
     from evaluation import *
 except:
+    warnings.warn('Could not import evaluation module', ImportWarning)
     pass
 
 try:
     from utils import *
 except:
+    warnings.warn('Could not import utils module', ImportWarning)
     pass
 
 try:
     from randomforest import *
+    warnings.warn('Could not import randomforest module', ImportWarning)
 except:
     pass
 

@@ -13,7 +13,7 @@ import seaborn as sns
 import numpy as np
 import random
 
-import stem_conus
+import stem
 
 from lthacks import attributes_to_df
 from lthacks import stats_functions as sf
@@ -26,7 +26,7 @@ def main(set_txt, train_params, plot_dims, out_png):
     sns.set_context(context='paper', font_scale=.3)
     sns.set_style('white', rc={'axes.linewidth': .5})
     
-    inputs, df_var = stem_conus.read_params(train_params)
+    inputs, df_var = stem.read_params(train_params)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])     
     predict_cols = sorted(df_var.index)

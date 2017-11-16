@@ -20,7 +20,7 @@ import time
 from datetime import datetime
 from multiprocessing import Pool
 
-import stem_conus
+import stem
 from lthacks import attributes_to_df
 
 gdal.UseExceptions()
@@ -75,13 +75,19 @@ def find_file(basepath, search_str, tile_str=None, path_filter=None, year=None):
         return None
      
     if tile_str: 
-        bp = os.path.join(basepath, tile_str)
+        '''try:
+            bp = os.path.join(basepath, tile_str)
+        except:
+            import pdb; pdb.set_trace()#'''
 
         # Search the bp directory tree. If search_str is in a file, get the full path.
         paths = []
-        for root, dirs, files in os.walk(bp, followlinks=True):
-            these_paths = [os.path.join(root, f) for f in files]
-            these_paths = fnmatch.filter(these_paths, search_str)
+        for root, dirs, files in os.walk(basepath, followlinks=True):
+            if not os.path.basename(root) == tile_str:
+                continue
+            #these_paths = [os.path.join(root, f) for f in files]
+            #these_paths = [f for f in fnmatch.filter(these_paths, '*%s*%s' % (tile_str, search_str)]# if tile_str in f]
+            these_paths = [os.path.join(root, f) for f  in fnmatch.filter(files, search_str)]
             paths.extend(these_paths)
     else:
         paths = glob.glob(os.path.join(basepath, search_str))
@@ -173,10 +179,10 @@ def within(x, y, poly):
 
 def par_within(args):
     
-    geom_coords, xy_temp, id_field, feature_id, n, n_features = args
+    geom_coords, xy_temp, feature_id, n, n_features = args
     pct_progress = float(n + 1)/n_features * 100
     points = [i for i, (x, y) in xy_temp[['x','y']].iterrows() if within(x, y, geom_coords)]
-    sys.stdout.write('\rRetreived points for feature %s of %s (%%%.1f)' % (n + 1, n_features, pct_progress))
+    sys.stdout.write('\rRetreived points for feature %s of %s (%.1f%%)' % (n + 1, n_features, pct_progress))
     sys.stdout.flush()
     return feature_id, points#"""
 
@@ -198,10 +204,11 @@ def extract_from_shp(lyr, df_xy, id_field=None, n_jobs=0):
         t1 = time.time()
         args = []
         n_features = lyr.GetFeatureCount()
-        for i in xrange(n_features):
-            feature = lyr.GetFeature(i)
+        tile_ids = []
+        for i, feature in enumerate(lyr):
+            #feature = lyr.GetFeature(i)
             geometry = feature.GetGeometryRef()
-            geom_coords = stem_conus.get_coords_from_geometry(geometry, multipart='split')
+            geom_coords = stem.get_coords_from_geometry(geometry, multipart='split')
             
             # Initially select only samples that fit within the bounds of the this feature
             min_x, max_x, min_y, max_y = geometry.GetEnvelope()
@@ -212,12 +219,16 @@ def extract_from_shp(lyr, df_xy, id_field=None, n_jobs=0):
             #if id_field_given:
             #    feature_id = feature.GetField(id_field)
             #else:
-            feature_id = feature.GetFID()
-            args.append([geom_coords, xy_temp, id_field, feature_id, i, n_features])
+            #feature_id = feature.GetFID()
+            feature_id = feature.GetField(id_field)
+            if len(xy_temp) > 0: 
+                tile_ids.append(feature_id)
+            args.append([geom_coords, xy_temp, feature_id, i, n_features])
             feature.Destroy()
-            sys.stdout.write('\rInitial filter of points for (%%%.1f) of features' % (float(i)/n_features * 100))
+            sys.stdout.write('\rInitial filter of points for (%.1f%%) of features' % (float(i)/n_features * 100))
             sys.stdout.flush()
-        print '\nTime for getting args: %.1f seconds\n' % (time.time() - t1)
+            #feature.Destroy()
+        print '\nTime for filtering: %.1f minutes\n' % ((time.time() - t1)/60)
 
         # Predict in parallel
         t1 = time.time()
@@ -228,16 +239,16 @@ def extract_from_shp(lyr, df_xy, id_field=None, n_jobs=0):
         print '\nTime for extraction: %.1f minutes\n' % ((time.time() - t1)/60)
         
         t1 = time.time()
-        for i, p in points:
-            df_xy.ix[p, 'tile_fid'] = i
-        print 'Time for adding to df: %.1f seconds\n' % ((time.time() - t1))
-    
+        '''for i, p in points:
+            df_xy.ix[p, 'tile_id'] = i
+        print 'Time for adding to df: %.1f minutes\n' % ((time.time() - t1)/60)'''
+        point_dict = {tile_id: point_ids for tile_id, point_ids in points if len(point_ids) > 0}
     else:
-        for i in xrange(lyr.GetFeatureCount()):
-            feature = lyr.GetFeature(i)
+        for feature in lyr:
+            #feature = lyr.GetFeature(i)
             geometry = feature.GetGeometryRef()
             
-            #geom_coords = stem_conus.get_coords_from_geometry(geometry)
+            #geom_coords = stem.get_coords_from_geometry(geometry)
             min_x, max_x, min_y, max_y = geometry.GetEnvelope()
             
             
@@ -257,33 +268,34 @@ def extract_from_shp(lyr, df_xy, id_field=None, n_jobs=0):
             df_xy.ix[xy_temp.index, 'tile_fid'] = feature_id
             feature.Destroy()
     
-    return df_xy
+    return point_dict
     
 
 def extract_at_xy(df, mosaic, data_tx, val_name):
     
-    in_cols = df.columns
+    '''in_cols = df.columns
     x_res, y_res = data_tx[1], data_tx[5]
     ul_x, ul_y = data_tx[0], data_tx[3]
     
     if 'row' not in df.columns:
         df['row'] = [int((y - ul_y)/y_res) for y in df['y']]
-        df['col'] = [int((x - ul_x)/x_res) for x in df['x']]
+        df['col'] = [int((x - ul_x)/x_res) for x in df['x']]'''
     
     n_jobs = 20
     if type(mosaic) == ogr.Layer:
-        df = extract_from_shp(mosaic, df, val_name, n_jobs=n_jobs)
+        point_dict  = extract_from_shp(mosaic, df, val_name, n_jobs=n_jobs)
         val_name = 'tile_fid'
      
     # Otherwise, it's a numpy array
     else:
         ar_rows, ar_cols = mosaic.shape
         df[val_name] = [mosaic[r, c] if r > 0 and r < ar_rows and c > 0 and c < ar_cols else None for r,c in zip(df['row'], df['col'])]
+        point_dict = {}
     
-    return df[['row', 'col', val_name]] 
+    return point_dict
 
 
-def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, val_cols, data_type, nodata=None, kernel=False):
+def extract_by_rowcol(df, sample_ids, filepath, file_col, var_name, data_band, mosaic_tx, val_cols, data_type, nodata=None, kernel=False):
     '''
     Return a dataframe with values from all pixels defined by row, col in df. 
     If row_dirs and col_dirs are defined, get surrounding pixels in a 
@@ -292,13 +304,14 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
     row_dirs = [-1,-1,-1, 0, 0, 0, 1, 1, 1]
     col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
     
-    df_file = df[df[file_col] == filepath]
+    #df_file = df[df[file_col] == filepath]
+    df_file = df.ix[sample_ids]
     
     # If the filepath is an integer, the file could not be found so just
     #   return bogus values that can be picked out later
     if type(filepath) == int:
         vals = np.full((len(df_file),len(val_cols)), nodata, dtype=np.int32)
-        df.ix[df[file_col] == filepath, var_name] = vals
+        df.ix[sample_ids, var_name] = vals
     
     # Otherwise it should be a real filepath
     else:
@@ -323,8 +336,8 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
             # Need to buffer the array because of extracting kernel at edges
             ar = np.full((ysize + 2, xsize + 2), nodata, dtype=np.int16)
             ar[1:-1, 1:-1] = band.ReadAsArray()#'''
-            row_off += 1
-            col_off += 1
+            row_off -= 1
+            col_off -= 1
             
             data_rows = [row - row_off + d for row in df_file.row for d in row_dirs]
             data_cols = [col - col_off + d for col in df_file.col for d in col_dirs]
@@ -332,15 +345,16 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
             # Get the data values and stats for each kernel
             try:
                 vals = ar[data_rows, data_cols].reshape(len(df_file), len(val_cols))
+                
             except:
                 import pdb; pdb.set_trace()
         
             # Make a df from the array and from an array of stats for each kernel
             df_vals = pd.DataFrame(vals, columns=val_cols, index=df_file.index)
             df_stats = pd.DataFrame(calc_row_stats(vals, data_type, var_name, nodata), index=df_file.index)
-            
+
             # Add the new values and stats to the input df 
-            df.ix[df[file_col] == filepath, var_name] = df_stats[var_name]
+            df.ix[sample_ids, var_name] = df_stats[var_name]
             stat_cols = list(df_stats.columns)
             df_vals[stat_cols] = df_stats
             df_vals[file_col] = df_file[file_col]
@@ -351,7 +365,7 @@ def extract_by_rowcol(df, filepath, file_col, var_name, data_band, mosaic_tx, va
                 vals = {}
                 for i, (c, r) in df_file[['col', 'row']].iterrows():
                     v = band.ReadAsArray(c - col_off, r - row_off, 1, 1)
-                    import pdb; pdb.set_trace()
+                    #import pdb; pdb.set_trace()
                     vals[i] = v[0][0]
                 #vals = {var_name: [band.ReadAsArray(c - col_off, r - row_off, 1, 1)[0][0] for i, (c, r) in df_file[['col', 'row']].iterrows()]}
             else:
@@ -410,7 +424,7 @@ def par_extract_by_rowcol(args):
     return extract_by_rowcol(*args[:-1])
     
 
-def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, basepath, search_str, path_filter, mosaic_tx, file_count, n_files, nodata=None, kernel=False):
+def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, point_dict, basepath, search_str, path_filter, mosaic_tx, file_count, n_files, nodata=None, kernel=False):
     '''
     Return a dataframe of 
     '''
@@ -438,34 +452,38 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, b
         
     # Get the file string for each xy for each year
     df_xy[file_col] = ''# Creates the column but keeps it empty
-    for tile in df_xy.tile_id.unique():
+    #for tile in df_xy.tile_id.unique():
+    for tile in point_dict.keys():
         try:
-            df_xy.loc[df_xy['tile_id'] == tile, file_col] = df_tile.loc[df_tile['tile_id'] == tile, file_col].values[0]
+            #df_xy.loc[df_xy['tile_id'] == tile, file_col] = df_tile.loc[df_tile['tile_id'] == tile, file_col].values[0]
+            df_xy.loc[point_dict[tile], file_col] = df_tile.loc[df_tile['tile_id'] == tile, file_col].values[0]
         except:
             import pdb; pdb.set_trace()
-
+    #import pdb; pdb.set_trace()
     # For each file, get the dataset as an array and extract all values at each row col
     val_cols = ['%s_%s' % (var_col, i) for i in range(1,10)]
-    '''for f in df_tile[file_col].unique():
+    #for i, f in enumerate(df_tile[file_col].unique()):
+    for i, tile in enumerate(point_dict):
+        f = df_tile.ix[df_tile.tile_id == tile, file_col].values[0]
         print 'Extracting for array %s of approximately %s from:\n%s\n'\
-        % (last_file, n_files, f)
-        dfs.append(extract_by_rowcol(df_xy, f, file_col, var_col, data_band,
+        % (file_count, n_files, f)
+        dfs.append(extract_by_rowcol(df_xy, point_dict[tile], f, file_col, var_col, data_band,
                                      mosaic_tx, val_cols, data_type, nodata,
                                      kernel
                                      ))
-        file_count += 1'''
-    args = []
+        file_count += 1#'''
+        #this_count = i + 1
+    '''args = []
     for i, f in enumerate(df_tile[file_col].unique()):
         args.append([df_xy, f, file_col, var_col, data_band, mosaic_tx, val_cols, data_type, nodata, kernel, i + 1 + file_count])
-    n_jobs=10
+    n_jobs=20
     pool = Pool(n_jobs)
-    this_count = len(args)
     print 'Extracting from %s-%s files of %s...' % (file_count, file_count + this_count, n_files)
     dfs = pool.map(par_extract_by_rowcol, args, 1)
     pool.close()
-    pool.join()
+    pool.join()'''
     print '\nTime for this variable: %.1f minutes\n' % ((time.time() - t0)/60)
-    file_count += this_count
+    #file_count += this_count
     
     # Comnbine all the pieces for this year
     df_var = pd.concat(dfs)
@@ -507,8 +525,10 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
             ' param file:\n%s\n. Re-run script with either of these' +\
             ' parameters given.' % params)
     if 'kernel' in inputs:
-        if inputs['kernel'].lower() == 'true':
+        if inputs['kernel'].lower().replace('"','') == 'true':
             kernel = True
+        else:
+            kernel = False
     
     # Get the TSA mosaic as an array
     #if (df_vars.by_tsa == 1).any():
@@ -535,6 +555,7 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
             exc_type_str = str(exc_type).split('.')[-1].replace("'", '').replace('>', '')
             msg = ('Could not open mosaic_path as vector : dataset %s.\n%s: %s' +\
                    '\n\nAttempting to open as raster...\n') % (mosaic_path, exc_type_str, exc_msg)
+            warnings.warn(msg)
             
         except:
             exc_type, exc_msg, _ = sys.exc_info()
@@ -547,16 +568,21 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
 
 
     # Only need to do this once per xy sample set
-    # Get the TSA at each xy location and the row and col 
+    # Get the tile id at each xy location and the row and col 
     print 'Extracting tile IDs... %s\n' % time.ctime(time.time())
     df_xy = pd.read_csv(xy_txt, sep='\t', index_col='obs_id')
     if np.any(df_vars.by_tile):
-        extract_at_xy(df_xy, mosaic, mosaic_tx, tile_id_field)# Gets val inplace
-        df_mosaic = attributes_to_df(mosaic_path)
-        df_xy = df_xy[~df_xy.tile_fid.isnull()] #drop samples that weren't inside a tile
-        df_xy['tile_id'] = df_mosaic.ix[df_xy['tile_fid'], tile_id_field].tolist()
-        #tile_id_field = 'tile_id'
+        point_dict = extract_at_xy(df_xy, mosaic, mosaic_tx, tile_id_field)# Gets val inplace
+        if len(point_dict) > 0:
+            tile_ids = point_dict.keys()
+        else:
+            tile_ids = df_xy[tile_id_field].unique()
     
+        #df_mosaic = attributes_to_df(mosaic_path)
+        #df_xy = df_xy[~df_xy.tile_fid.isnull()] #drop samples that weren't inside a tile
+        #df_xy['tile_id'] = df_mosaic.ix[df_xy['tile_fid'], tile_id_field].tolist()
+        #tile_id_field = 'tile_id'
+    #import pdb; pdb.set_trace()
     
     ul_x, x_res, x_rot, ul_y, y_rot, y_res = mosaic_tx
     df_xy['row'] = [int((y - ul_y)/y_res) for y in df_xy.y]
@@ -564,7 +590,8 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
     #df_xy = df_xy[df_xy.tile_id > 0]
     #df_xy[tile_id_field] = 0
         
-    tile_ids = df_xy['tile_id'].unique()
+    #tile_ids = df_xy['tile_id'].unique()
+    
     if 'tile_txt' in inputs:
         df_tile = pd.read_csv(tile_txt, sep='\t', dtype={'tsa_str':object})
         df_tile['tile_str'] = df_tile['tsa_str']
@@ -586,7 +613,7 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
     last_file = 1
     for year in years:
         t1 = time.time()
-        df_yr = pd.DataFrame()
+        df_yr = pd.DataFrame(index=df_xy.index)
         for var_name, var_row in df_vars.iterrows(): #var_name is index col
             # Get variables from row
             search_str  = var_row.search_str
@@ -606,25 +633,27 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
                 data_band = int(var_row.data_band)
 
             df_var, last_file = extract_var(year, var_name, by_tile, data_band,
-                                             data_type, df_tile, df_xy, basepath,
+                                             data_type, df_tile, df_xy, point_dict, basepath,
                                              search_str, path_filter, mosaic_tx,
                                              last_file, n_files, nodata, kernel)
             df_yr[df_var.columns] = df_var
             #last_file += this_count
         
         # Write df_var with all years for this predictor to txt file
-        this_bn = '%s_%s_kernelstats.txt' % (xy_txt_bn[:-4], year)
-        this_txt = os.path.join(out_dir, this_bn)
-        df_yr.to_csv(this_txt, sep='\t')
         df_xy[df_vars.index.tolist()] = df_yr[df_vars.index.tolist()]
+        if kernel:
+            this_bn = '%s_%s_kernelstats.txt' % (xy_txt_bn[:-4], year)
+            this_txt = os.path.join(out_dir, this_bn)
+            df_yr.to_csv(this_txt, sep='\t')
+
         print 'Time for year %s: %.1f minutes\n\n' % (year, ((time.time() - t1)/60))
         
     mosaic_ds = None
     
     # Write the dataframe to a text file
     #if out_dir:
-    out_cols = [col for col in df_xy.columns if 'file' not in col]
-    import pdb; pdb.set_trace()
+    #out_cols = [col for col in df_xy.columns if 'file' not in col]
+    out_cols = ['x', 'y', target_col] + df_vars.index.tolist()
     
     out_bn = xy_txt_bn.replace('.txt', '_predictors.txt')
     out_txt = os.path.join(out_dir, out_bn)
@@ -636,6 +665,8 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
     df_xy.ix[null_mask, out_cols].to_csv(out_txt.replace('.txt', '_dropped.txt'), sep='\t')
     print 'Dataframe written to:\n', out_txt       
     print 'Total extraction time: %.1f minutes' % ((time.time() - t0)/60)
+    
+    return out_txt
 
 if __name__ == '__main__':
      params = sys.argv[1]

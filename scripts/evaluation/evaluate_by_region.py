@@ -15,7 +15,6 @@ import pandas as pd
 import numpy as np
 
 import evaluation
-import stem
 from get_stratified_random_pixels import parse_bins, read_params
 
 from lthacks import stats_functions as sf

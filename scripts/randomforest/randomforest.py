@@ -295,20 +295,24 @@ def sample_predictors(df, df_var, nodata):
     return df[df[var] != nodata]
 
 
-def train_rf_classifier(x, y, ntrees=50, njobs=12, max_depth=None):
-
-    rf = ensemble.RandomForestClassifier(n_estimators=ntrees, n_jobs=njobs, max_depth=max_depth, oob_score=True)
+def train_rf_classifier(x, y, ntrees=50, njobs=12, max_depth=None, max_features='auto'):
+    ''' Return a trained Random Forest classifier'''
+    rf = ensemble.RandomForestClassifier(n_estimators=ntrees,
+                                         n_jobs=njobs,
+                                         max_depth=max_depth,
+                                         max_features=max_features,
+                                         oob_score=True)
     rf.fit(x, y)
 
     return rf
 
 
-def train_rf_regressor(x, y, ntrees=50, njobs=12, max_depth=None):
-    ''' Return a Random Forest regressor'''
+def train_rf_regressor(x, y, ntrees=50, njobs=12, max_depth=None, max_features='sqrt'):
+    ''' Return a trained Random Forest regressor'''
     rf = ensemble.RandomForestRegressor(n_estimators=ntrees,
                                         n_jobs=njobs,
                                         max_depth=max_depth,
-                                        max_features='sqrt',
+                                        max_features=max_features,
                                         oob_score=True)
     rf.fit(x, y)
 
@@ -357,7 +361,7 @@ def find_file(basepath, search_str, tsa_str=None, path_filter=None):
         print 'Selecting the first one found...\n'# '''
     
     #import pdb; pdb.set_trace()
-    if len(paths) < 1:
+    if len(paths) == 0:
         #pdb.set_trace()
         sys.exit(('No files found for tsa {0} with basepath {1} and ' +\
         'search_str {2}\n').format(tsa_str, basepath, search_str))
@@ -374,8 +378,8 @@ def get_predictors(df_var, nodata, ydims=None, constant_vars=None):
     t0 = time.time()
     predictors = []
     for var, row in df_var.iterrows():
-        data_band, search_str, basepath, by_tsa, nodata, path_filter = row
-        #import pdb; pdb.set_trace()
+        data_band, search_str, basepath, by_tsa, path_filter = row
+        #data_band, search_str, basepath, by_tsa, nodata, path_filter = row
         
         if constant_vars: search_str = search_str.format(constant_vars['YEAR'])        
         
@@ -394,8 +398,9 @@ def get_predictors(df_var, nodata, ydims=None, constant_vars=None):
         else:
             ar_var = ds.ReadAsArray()
         ds = None
-        this_nodata = row.nodata
-        ar_var[ar_var == this_nodata] = nodata # Change var nodata to nodata val for output
+        if 'nodata' in row:
+            this_nodata = row.nodata
+            ar_var[ar_var == this_nodata] = nodata # Change var nodata to nodata val for output
         predictors.append(ar_var.ravel())
         #print 'Shape of %s: %s' % (var, ar_var.ravel().shape)
     

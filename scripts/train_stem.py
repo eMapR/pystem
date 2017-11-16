@@ -17,13 +17,13 @@ import numpy as np
 import cPickle as pickle
 
 # Import ancillary scripts
-import stem_conus
+import stem
 #import generate_gsrd as gsrd
 
-def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_oob_map=False, snap_coord=None):
+def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_oob_map=False, snap_coord=None, oob_map_metric='oob_rate'):
     t0 = time.time()
     
-    inputs, df_var = stem_conus.read_params(params)
+    inputs, df_var = stem.read_params(params)
     
     # Convert params to named variables and check for required vars
     for i in inputs:
@@ -31,7 +31,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     try:
         if 'max_features' not in locals(): max_features=None
         if 'min_oob' in inputs: min_oob = int(min_oob)
-        num_vars = stem_conus.vars_to_numbers(cell_size, support_size, sets_per_cell,
+        num_vars = stem.vars_to_numbers(cell_size, support_size, sets_per_cell,
                                    min_obs, max_features, pct_train)
         cell_size, support_size, sets_per_cell, min_obs, max_features, pct_train = num_vars
         str_check = sample_txt, target_col, mosaic_path, out_dir, model_type
@@ -53,7 +53,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     if target_col not in df_train.columns:
         raise NameError('target_col "%s" not in sample_txt: %s' % (target_col, sample_txt))
     
-    # Make a timestamped output directory if outdir not specified
+    '''# Make a timestamped output directory if outdir not specified
     now = datetime.now()
     date_str = str(now.date()).replace('-','')
     time_str = str(now.time()).replace(':','')[:4]
@@ -77,11 +77,11 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     if snap_coord:
         snap_coord = [int(c) for c in snap_coord.split(',')]
     out_txt = os.path.join(out_dir, stamp + '.txt')
-    '''train_dict, df_sets, oob_dict = stem_conus.get_gsrd(mosaic_path, cell_size, support_size,
+    '''train_dict, df_sets, oob_dict = stem.get_gsrd(mosaic_path, cell_size, support_size,
                                               sets_per_cell, df_train, min_obs,
                                               target_col, predict_cols, out_txt,
                                               gsrd_shp, pct_train, snap_coord=snap_coord)#'''
-    df_sets = stem_conus.get_gsrd(mosaic_path, cell_size, support_size,
+    df_sets = stem.get_gsrd(mosaic_path, cell_size, support_size,
                                               sets_per_cell, df_train, min_obs,
                                               target_col, predict_cols, out_txt,
                                               gsrd_shp, pct_train, snap_coord=snap_coord)
@@ -100,10 +100,10 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     t1 = time.time()
     if model_type.lower() == 'classifier':
         print 'Training STEM with classifier algorithm...'
-        model_func = stem_conus.fit_tree_classifier
+        model_func = stem.fit_tree_classifier
     else:
         print 'Training STEM with regressor algorithm...'
-        model_func = stem_conus.fit_tree_regressor
+        model_func = stem.fit_tree_regressor
     x_train = df_train.reindex(columns=predict_cols)
     y_train = df_train[target_col]
     importance_cols = ['importance_%s' % c for c in predict_cols]
@@ -122,11 +122,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         format_obj = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, int(np.mean(oob_rates))
         sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes. Avg oob: %s' % format_obj)
         sys.stdout.flush()
-        '''this_x = x_train.ix[train_dict[ind]]
-        this_y = y_train.ix[train_dict[ind]]
-        dt_model = model_func(this_x, this_y, max_features)
-        df_sets.ix[ind, 'dt_model'] = dt_model
-        df_sets.ix[ind, importance_cols] = dt_model.feature_importances_'''
+
         # Get all samples within support set
         sample_inds = df_train.index[(df_train['x'] > ss[['ul_x', 'lr_x']].min()) &
         (df_train['x'] < ss[['ul_x', 'lr_x']].max()) &
@@ -142,7 +138,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         this_y = y_train.ix[sample_inds]
         support_set = df_sets.ix[ind]
         dt_path = dt_path_template % ind
-        dt_model, train_inds, oob_inds, importance, oob_metrics = stem_conus.train_estimator(support_set, n_samples, this_x, this_y, model_func, model_type, max_features, dt_path)
+        dt_model, train_inds, oob_inds, importance, oob_metrics = stem.train_estimator(support_set, n_samples, this_x, this_y, model_func, model_type, max_features, dt_path)
         oob_rates.append(oob_metrics['oob_rate'])
         df_sets.ix[ind, importance_cols] = importance
         df_sets.ix[ind, 'dt_model'] = dt_model
@@ -165,12 +161,17 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     # Calculate OOB rates and drop sets with too low OOB
     print 'Calculating OOB rates...'
     t1 = time.time()
-    df_sets, low_oob = stem_conus.get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob)
+    df_sets, low_oob = stem.get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob)
     if len(low_oob) > 0:
-        df_sets.drop(low_oob.index, inplace=True)
-        low_oob_shp = os.path.join(out_dir, 'gsrd_low_oob.shp')
+        #df_sets.drop(low_oob.index, inplace=True)
+        low_oob_shp = os.path.join(out_dir, 'low_oob_sets.shp')
         low_oob.drop('dt_model', axis=1, inplace=True)
-        stem_conus.coords_to_shp(low_oob, gsrd_shp, low_oob_shp)
+        stem.coords_to_shp(low_oob, gsrd_shp, low_oob_shp)
+    set_shp = os.path.join(out_dir, 'support_sets.shp')
+    try:
+        stem.coords_to_shp(df_sets, gsrd_shp, set_shp)
+    except Exception as e:
+        print e.message
     print '%s sets dropped because OOB rate < %s' % (len(low_oob), min_oob)
     print 'Min OOB rate after dropping: ', df_sets.oob_rate.min()
     print 'Estimated average OOB score: ', int(df_sets.oob_rate.mean())
@@ -182,17 +183,17 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     df_sets['set_id'] = df_sets.index
     df_sets.drop('dt_model', axis=1).to_csv(set_txt, sep='\t', index=False)
     t1 = time.time()
-    #df_sets, set_txt = stem_conus.write_model(out_dir, df_sets)
+    #df_sets, set_txt = stem.write_model(out_dir, df_sets)
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
-    '''stamp = os.path.basename(out_dir)
+    stamp = os.path.basename(out_dir)
     set_txt = '/vol/v2/stem/conus/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
     #with open(oob_pkl, 'rb') as f:
     #    oob_dict = pickle.load(f)
     oob_dict = {}
-    predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_bright','delta_green','delta_nbr','delta_wet', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
+    predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_brightness','delta_greenness','delta_nbr','delta_wetness', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
     if make_oob_map:
         # Check if oob_map params were specified. If not, set to defaults
         if 'n_tiles' not in locals():
@@ -230,10 +231,10 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
             y_res = -resolution
             tx = ul_x, x_res, 0, ul_y, 0, y_res
         
-        avg_dict, df_sets = stem_conus.oob_map(ysize, xsize, 0, mask, n_tiles, tx,
+        avg_dict, df_sets = stem.oob_map(ysize, xsize, 0, mask, n_tiles, tx,
                                      support_size, oob_dict, df_sets, df_train, target_col,
                                      predict_cols, out_dir,
-                                     stamp, prj, driver)
+                                     stamp, prj, driver, oob_map_metric)
         df_sets.to_csv(set_txt, sep='\t')#'''
 
         avg_oob = round(avg_dict['oob'], 1)

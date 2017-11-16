@@ -18,7 +18,7 @@ from sklearn import metrics
 
 import stem
 import mosaic_by_tsa as mosaic
-from extract_xy_by_tsa import calc_row_stats
+from extract_xy_by_mosaic import calc_row_stats
 
 #gdal.UseExceptions()
 
@@ -265,112 +265,6 @@ def zonal_stats(ar, shp, tx, nodata, stat_dict, unique_mask=False):
     df = pd.DataFrame(zonal_stats)
 
     return df
-
-   
-
-"""def zonal_stats(ar_pred, ar_targ, ar_diff, ar_stdv, shp, tx, nodata_p, nodata_t, unique_mask=False):
-    '''
-    Calculate zonal stats within polygons from shp
-    '''
-    ds = ogr.Open(shp)
-    lyr = ds.GetLayer()
-    
-    # For each feature, get a mask and calculate stats for the masked part of the array
-    feat = lyr.GetNextFeature()
-    ul_x, x_res, x_rot, ul_y, y_rot, y_res = tx
-    zone_mask = feature_to_mask(feat, x_res, y_res) # Mask is always the same for hex
-    t_range = ar_targ[ar_targ != nodata_t].max() - ar_targ[ar_targ != nodata_t].min() # For calculating RMSPE
-    zonal_stats = []
-    #stats_targ = []
-    c = 0
-    while feat:
-        # If each feature is a unique shape and/or size
-        if unique_mask:
-            zone_mask = feature_to_mask(feat, x_res, y_res)
-        a_inds, m_inds = get_zone_inds(ar_pred.shape, zone_mask.shape, tx, feat)
-        
-        # Get a rectanglular subset of each array
-        ar_pred_sub = ar_pred[a_inds[0]:a_inds[1], a_inds[2]:a_inds[3]]
-        ar_targ_sub = ar_targ[a_inds[0]:a_inds[1], a_inds[2]:a_inds[3]]
-        ar_diff_sub = ar_diff[a_inds[0]:a_inds[1], a_inds[2]:a_inds[3]]
-        ar_stdv_sub = ar_stdv[a_inds[0]:a_inds[1], a_inds[2]:a_inds[3]]
-        
-        # Mask out the pixels outside the feature
-        m_zone = zone_mask[m_inds[0]:m_inds[1], m_inds[2]:m_inds[3]]
-        p_zone = ar_pred_sub[m_zone]
-        t_zone = ar_targ_sub[m_zone]
-        d_zone = ar_diff_sub[m_zone]
-        s_zone = ar_stdv_sub[m_zone]
-        
-        # Mask out nodata values
-        p_zone_mask = p_zone == nodata_p
-        t_zone_mask = t_zone == nodata_t
-        nans = np.logical_or(p_zone_mask, t_zone_mask)
-        p_zone = p_zone[~nans]
-        t_zone = t_zone[~nans]
-        d_zone = d_zone[~nans]
-        s_zone = s_zone[~p_zone_mask]
-        
-        fid = feat.GetFID()
-        # Get prediction stats
-        mean_p = p_zone.mean()
-        mean_t = t_zone.mean()
-        mean_d = mean_p - mean_t
-        #mean_d = d_zone.mean() #Mean of difference arrray within zone
-        
-        # Calc root mean square percentage error
-        rmspe = calc_rmspe(t_zone, p_zone)
-        
-        # Calc aggreement coefficient (AC), systematic AC, and unsystematic AC
-        ac, ac_s, ac_u, ssd, spod = calc_agree_coef(t_zone, p_zone, mean_t, mean_p)
-        
-        # Calc Willmott's Index of Agreement (d)
-        pe = np.sum(np.abs(t_zone - mean_t) + np.abs(p_zone - mean_t) ** 2) #potential error
-        d = 1 - (ssd/pe)
-        
-        these_stats = {'fid': fid,
-                      'pred_mean': mean_p,
-                      'targ_mean': mean_t,
-                      'mean_dif': mean_d,
-                      'stdv': s_zone.mean()/100,
-                      'rmspe': rmspe,
-                      'agree_coef': ac,
-                      'AC_sys': ac_s,
-                      'AC_unsys': ac_u,
-                      'ssd': ssd,
-                      'spod': spod,
-                      'willmott': d
-                      }
-                      
-        # Get stats for quantiles
-        bin_sz = t_range/10
-        lims = [(-1, 0)] + [(i, i + bin_sz) for i in range(0, t_range, bin_sz)]
-        #quantile_vals = {}
-        for lower, upper in lims:
-            dec_mask = (t_zone <= lower) | (t_zone > upper) | (p_zone <= lower) | (p_zone > upper)
-            # If there aren't any values in this bin, set rmspe to nodata value
-            if np.all(~dec_mask):
-                this_rmspe = nodata_p
-            else:
-                this_t = t_zone[~dec_mask]
-                this_p = p_zone[~dec_mask]
-                #quantile_vals['targ_%s' % upper] = this_t
-                #quantile_vals['pred_%s' % upper] = this_p
-                this_rmspe = calc_rmspe(this_t, this_p)
-            field = 'rmspe_%s' % upper
-            these_stats[field] = this_rmspe
-            
-        zonal_stats.append(these_stats)
-        
-        feat.Destroy()
-        feat = lyr.GetNextFeature()
-        c += 1
-
-    ds.Destroy()
-    
-    df = pd.DataFrame(zonal_stats)
-    df = df.reindex(columns=['fid', 'pred_mean', 'targ_mean', 'mean_dif', 'stdv', 'agree_coef', 'AC_sys', 'AC_unsys', 'ssd', 'spod', 'willmott', 'rmspe'] + ['rmspe_%s' % u for l, u in lims])
-    return df#"""
     
     
 def df_to_shp(df, in_shp, out_path, copy_fields=True):
@@ -517,19 +411,41 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
         test_stats = pd.DataFrame(calc_row_stats(t_kernel, 'continuous', 'value', t_nodata))
         t_samples = test_stats.value.values[sample_mask].astype(np.int32)
         print 'Time to get samples: %.1f seconds\n' % (time.time() - t0)#'''
-        
-
     
     return t_samples, p_samples
 
 
-def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None, bins=10, out_txt=None, match=False, target_col=None):
+def area_weighted_rmse(ar_p, ar_t, p_sample, t_sample, bins, p_nodata):
+    
+    scores = []
+    size = float(ar_p[ar_p != p_nodata].size)
+    for i, (l, u) in enumerate(bins):
+        print 'Calculating RMSE for reference class from %s to %s' % (l, u)
+        label = '%s_%s' % (l, u)
+        t_mask = (t_sample <= u) & (t_sample > l)
+        x = t_sample[t_mask]
+        y = p_sample[t_mask]
+        area = len(ar_p[(ar_p <= u) & (ar_p > l)])/size
+        scores.append({'label': label,
+                        'rmse': np.sqrt((((x - y)) ** 2).mean()),
+                        'area': area})
+    
+    df = pd.DataFrame(scores).set_index('label')
+    rmse_w = sum(df.area * df.rmse)
+    
+    return rmse_w
+
+
+def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None, bins=10, out_txt=None, match=False, target_col=None, get_totals=True, total_counts=None, silent=False):
     ''' 
     Return a dataframe of an area-adjusted confusion matrix
     '''
     # Check if bins is an int (could be an iterable of bin ranges). If so,
     #   calcualte bin ranges.
     t0 = time.time()
+    if not get_totals and total_counts==None:
+        get_totals = True
+        
     if type(bins) == int:
         t_range = (ar_t.max() - ar_t.min())
         bin_sz = t_range/bins
@@ -541,11 +457,17 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
         t_samples = samples[target_col].values
         #tt = ar_t[samples.row, samples.col]
         #import pdb; pdb.set_trace()
-        p_samples = ar_p[samples.row, samples.col]
-
+        if 'prediction' not in samples.columns:
+            p_samples = ar_p[samples.row, samples.col]
+        else:
+            p_samples = samples.prediction
+    
+    if not np.any(mask):
+        mask = (ar_p == p_nodata) | (ar_t == t_nodata)
     ar_p = ar_p[~mask]
     ar_t = ar_t[~mask]
     n_pixels = ar_t.size
+    del ar_t
     
     # For each bin in the target array, count how many pixels are in each bin
     #   in the prediction array.
@@ -553,10 +475,12 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     cols = {}
     labels = []
     sample_counts = []
-    total_counts  = {}
+    if get_totals:
+        total_counts  = {}
     empty_bins = []
     for i, (l, u) in enumerate(bins):
-        print 'Getting counts for reference class from %s to %s' % (l, u)
+        if not silent:
+            print 'Getting counts for reference class from %s to %s' % (l, u)
         t2 = time.time() 
         t_mask = (t_samples <= u) & (t_samples > l)# Create a mask of bin values from target
         p_mask = (p_samples <= u) & (p_samples > l)
@@ -566,7 +490,8 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
             cols[label] = np.zeros(len(bins))
             total_counts[label] = 0
             empty_bins.append(label)
-            print 'No samples found in prediction raster betwen %s and %s...\n' % (l, u)
+            if not silent:
+                print 'No samples found in prediction raster betwen %s and %s...\n' % (l, u)
             continue#'''
             
         counts = []
@@ -576,16 +501,19 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
 
             counts.append(len(this_p))
         
-        total_count = len(ar_p[(ar_p <= u) & (ar_p > l)])#total pixels in bin in predicted map
+        if get_totals:
+            total_count = len(ar_p[(ar_p <= u) & (ar_p > l)])#total pixels in bin in predicted map
         n_samples = len(p_samples[p_mask])#total samples in this bin in predicted samples
         #counts = counts #+ [n_samples, total_count] 
         
         #rows.append(counts)
         cols[label] = counts
-        total_counts[label] = total_count
         sample_counts.append(n_samples)
+        if get_totals:
+            total_counts[label] = total_count
         
-        print 'Time for this class: %.1f seconds\n' % (time.time() - t2)
+        if not silent:
+            print 'Time for this class: %.1f seconds\n' % (time.time() - t2)
     
     #import pdb; pdb.set_trace()
     df = pd.DataFrame(cols)#, columns=labels + ['n_samples', 'total'])
@@ -684,161 +612,10 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     
     if out_txt:
         df.to_csv(out_txt, sep='\t')
-        print '\nDataframe written to: ', out_txt 
+        if not silent: print '\nDataframe written to: ', out_txt 
     
-    print '\nTotal time: %.1f minutes' % ((time.time() - t0)/60)
+    if not silent: print '\nTotal time: %.1f minutes' % ((time.time() - t0)/60)
     return df#"""
-
-"""def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None, bins=10, out_txt=None, match=False, target_col=None):
-    ''' 
-    Return a dataframe of an area-adjusted confusion matrix
-    '''
-    # Check if bins is an int (could be an iterable of bin ranges). If so,
-    #   calcualte bin ranges.
-    t0 = time.time()
-    if type(bins) == int:
-        t_range = (ar_t.max() - ar_t.min())
-        bin_sz = t_range/bins
-        bins = [(-1, 0)] + [(i, i + bin_sz) for i in xrange(0, t_range, bin_sz)]
-    
-    if match:
-        t_samples, p_samples = get_samples(ar_p, ar_t, p_nodata, t_nodata, samples, match=match)
-    else:
-        t_samples = samples[target_col].values
-        #tt = ar_t[samples.row, samples.col]
-        #import pdb; pdb.set_trace()
-        p_samples = ar_p[samples.row, samples.col]
-
-    ar_p = ar_p[~mask]
-    ar_t = ar_t[~mask]
-    n_pixels = ar_t.size
-    
-    # For each bin in the target array, count how many pixels are in each bin
-    #   in the prediction array.
-    #rows = []
-    cols = {}
-    labels = []
-    sample_counts = {}
-    total_counts  = {}
-    for i, (l, u) in enumerate(bins):
-        print 'Getting counts for reference class from %s to %s' % (l, u)
-        t2 = time.time() 
-        t_mask = (t_samples <= u) & (t_samples > l)# Create a mask of bin values from target
-        p_mask = (p_samples <= u) & (p_samples > l)
-        '''if ~t_mask.any() or ~p_mask.any():
-            empty_bins = 
-            print 'Removing bin between %s and %s because no samples found in prediction or reference raster...\n % (l, u)
-            continue'''
-        label = '%s_%s' % (l, u)
-        labels.append(label)
-        counts = []
-        
-        for this_l, this_u in bins:
-            this_p_mask = (p_samples <= this_u) & (p_samples > this_l)
-            this_p = p_samples[t_mask & this_p_mask]
-
-            counts.append(len(this_p))
-        
-        total_count = len(ar_p[(ar_p <= u) & (ar_p > l)])#total pixels in bin in predicted map
-        n_samples = len(p_samples[p_mask])#total samples in this bin in predicted samples
-        #counts = counts #+ [n_samples, total_count] 
-        
-        #rows.append(counts)
-        cols[label] = counts
-        total_counts[label] = total_count
-        sample_counts[label] = n_samples
-        
-        print 'Time for this class: %.1f seconds\n' % (time.time() - t2)
-    
-    #import pdb; pdb.set_trace()
-    df = pd.DataFrame(cols)#, columns=labels + ['n_samples', 'total'])
-    df['bin'] = labels
-    df = df.set_index('bin')
-    
-    # Filter out any bins for which there aren't any samples in the prediction
-    #   because area adjustments are based on prediction
-    #null_reference = df.columns[~df.any(axis=0)]
-    null_predicted = df.columns[~df.any(axis=1)]
-    drop_bins = [l for l in labels if l in null_predicted]#null_reference and l in null_predicted]
-    labels = [l for l in labels if l not in null_predicted]
-    if len(drop_bins) > 0:
-        dropped_bin_str = '\n\t'.join([b.replace('_', '-') for b in drop_bins])
-        print 'No samples found in reference or prediction data for:\n\t%s' % dropped_bin_str
-    
-    df.drop(drop_bins, axis=0, inplace=True)
-    df.drop(drop_bins, axis=1, inplace=True)
-    #import pdb; pdb.set_trace()#'''
-    df['total_pxl'] = pd.Series(total_counts)
-    
-    #df['n_samples'] = sample_counts#'''
-
-    # Calculate proportional accuracy
-    df['pct_area'] = df.total_pxl/float(n_pixels)
-    df['total'] = df.ix[labels, labels].sum(axis=1).values
-    #import pdb; pdb.set_trace()
-    df.ix['total'] = df.ix[labels, labels].sum(axis=0).values
-    df_adj = df.ix[labels, labels].div(df.total, axis=0).mul(df.pct_area, axis=0)
-    df_adj[df_adj.isnull()] = 0
-    
-    # Calculate user's and producer's accuracy
-    for l in labels:
-        correct = df_adj.ix[l,l]
-        df.ix[l, 'user'] = correct / np.nansum(df_adj.ix[l, labels])
-        df.ix['producer', l] = correct / np.nansum(df_adj.ix[labels, l])
-    
-    # Calculate confidence intervals for user's and producer's
-    df['u_ci'] = df.ix[labels].apply(
-    lambda x: confidence_interval(x[labels], 
-                                  x['total'], 
-                                  x['pct_area'], 
-                                  x['user']
-                                  ),
-                                     axis=1).round(3) * 100
-    df.ix['p_ci'] = df[labels].apply(
-    lambda x: confidence_interval(x[labels], 
-                                  df.ix[labels, 'total'],
-                                  df.ix[labels, 'pct_area'], 
-                                  x['producer']
-                                  ),
-                                     axis=0).round(3) * 100
-    df['user'] = df['user'].round(3) * 100 # Round for readibility
-    df.ix['producer'] = df.ix['producer'].round(3) * 100
-    
-    # Calc overall accuracy and confidence interval
-    total_pxl = np.nansum(df_adj.values)
-    correct = np.diag(df_adj)
-    accuracy = np.nansum(correct)
-    df.ix['producer', 'acc_ci'] = confidence_interval(np.diag(df.ix[labels, labels]), 
-                                                      df.ix[labels, 'total'],
-                                                      df.ix[labels, 'pct_area'],
-                                                      accuracy
-                                                      ) * 100
-    
-    # Recalc totals with area-adjusted estimates
-    df.ix[labels, labels] = df_adj
-    df['total'] = np.nansum(df.ix[labels, labels], axis=1)
-    df.ix['total'] = np.nansum(df.ix[labels, labels], axis=0)
-    
-    # Calc kappa and disagreement
-    kappa = kappa_coeff(df, labels, accuracy)
-    df.ix['producer', 'user'] = round(100 * accuracy, 1)
-    df.ix['producer', 'kappa'] = round(kappa, 3)
-    disagree_q, total_q = quantity_disagreement(df, labels)
-    disagree_a, total_a = allocation_disagreement(df, labels)
-    df.ix[labels, 'quanitity'] = disagree_q
-    df.ix['producer', 'quanitity'] = total_q
-    df.ix[labels, 'allocation'] = disagree_a
-    df.ix['producer', 'allocation'] = total_a
-
-    try:
-        if out_txt:
-            df.to_csv(out_txt, sep='\t')
-            print '\nDataframe written to: ', out_txt 
-    except:
-        import pdb; pdb.set_trace()
-    
-    print '\nTotal time: %.1f minutes' % ((time.time() - t0)/60)
-    return df"""
 
 
 def kappa_coeff(df, labels, accuracy):

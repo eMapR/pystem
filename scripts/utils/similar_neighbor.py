@@ -14,7 +14,7 @@ from multiprocessing import Pool
 from evaluation import get_samples
 from stem import get_tiles, find_empty_tiles
 from lthacks import createMetadata
-from lthacks.intersectMask import saveArrayAsRaster
+from lthacks import array_to_raster
 
 def buffered_tile_inds(n_tiles, xsize, ysize, tx, tile_buffer, mask):
     
@@ -166,7 +166,7 @@ def main(in_raster, match_raster, in_nodata, match_nodata, out_raster=None, n_jo
         gdal_dtype = gdal.GDT_Byte
     else:
         gdal_dtype = gdal.GDT_Int16
-    saveArrayAsRaster(ar, tx, prj, driver, out_raster, gdal_dtype, match_nodata)
+    array_to_raster(ar, tx, prj, driver, out_raster, gdal_dtype, match_nodata)
     
     # Write metadata
     desc = ('Raster with values where input raster %s matched another ' +\

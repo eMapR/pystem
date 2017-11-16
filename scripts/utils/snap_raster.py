@@ -8,11 +8,10 @@ import os
 import sys
 import gdal
 import time
-import docopt
 import numpy as np
 
-from mosaic_by_tsa import get_offset_array_indices, calc_offset, array_to_raster
-from lthacks import createMetadata
+from mosaic_by_tsa import get_offset_array_indices, calc_offset
+from lthacks import createMetadata, array_to_raster, get_gdal_driver
 
 
 def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None, mask_val=None, overwrite=False):
@@ -26,7 +25,7 @@ def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None, mask_val=
     ds_in = gdal.Open(in_raster)
     ar_in = ds_in.ReadAsArray()
     tx_in = ds_in.GetGeoTransform()
-    driver = ds_in.GetDriver()
+    #driver = ds_in.GetDriver()
     ds_in = None
     
     ds_snap = gdal.Open(snap_raster)
@@ -59,6 +58,7 @@ def main(in_raster, snap_raster, in_nodata, out_nodata, out_path=None, mask_val=
         
         if os.path.exists(out_path) and not overwrite: 
             sys.exit('out_path already exists')
+        driver = get_gdal_driver(out_path)
         array_to_raster(ar, tx_snap, prj, driver, out_path, gdal_dtype, out_nodata)
         
         # Write metadata

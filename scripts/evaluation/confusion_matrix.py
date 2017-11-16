@@ -9,6 +9,7 @@ import gdal
 import os
 import sys
 import shutil
+import warnings
 import pandas as pd
 import numpy as np
 
@@ -90,11 +91,11 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
     t_ysize = ds_t.RasterYSize
     p_xsize = ds_p.RasterXSize
     p_ysize = ds_p.RasterYSize
-    
+    tx_t = ds_t.GetGeoTransform()
+    tx_p = ds_p.GetGeoTransform()
     # If two arrays are different sizes, make prediction array match reference
-    if not t_xsize == p_xsize or t_ysize == p_ysize:
-        tx_t = ds_t.GetGeoTransform()
-        tx_p = ds_p.GetGeoTransform()
+    if not t_xsize == p_xsize or t_ysize == p_ysize or tx_t != tx_p:
+        warnings.warn('Prediction and reference rasters do not share the same extent. Snapping prediction raster to reference....')
         offset = mosaic.calc_offset((tx_t[0], tx_t[3]), tx_p)
         t_inds, p_inds = mosaic.get_offset_array_indices((t_ysize, t_xsize), (p_ysize, p_xsize), offset)
         ar_buf = np.full(ar_t.shape, p_nodata, dtype=ar_p.dtype)
