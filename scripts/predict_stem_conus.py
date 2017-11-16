@@ -35,7 +35,7 @@ def parse_constant_vars(constant_vars):
     return var_dict
 
     
-def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs_pred=0, n_jobs_agg=0, mosaic_nodata=0):
+def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs_pred=0, n_jobs_agg=0, mosaic_nodata=0, snap_coord=None, overwrite_sets=False):
     inputs, df_var = stem_conus.read_params(params)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])    
@@ -90,24 +90,23 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         os.mkdir(predict_dir)
     
     set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
-    #set_txt = '/vol/v1/general_files/user_files/samh/pecora/imperv_maps/urban_sets.txt'
-    # if subset_shp, get just overlapping sets
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
-
+    
     if mosaic_path.endswith('.shp'):
-        if 'subset_shp' in inputs:
-            '''out_shp_bn = os.path.basename(mosaic_path).replace('.shp', '_clipped.shp')
-            out_shp = os.path.join(out_dir, out_shp_bn)
-            cmd = 'ogr2ogr -skipfailures -clipsrc {clip_shp} {out_shp} {in_shp}'.format(clip_shp=subset_shp, out_shp=out_shp, in_shp=mosaic_path)
-            subprocess.call(cmd, shell=True)'''
-            
-            mosaic_path = subset_shp
         mosaic_type = 'vector'
-        if 'resolution' not in inputs:
-            warnings.warn('Resolution not specified. Using default of 30...\n')
+        # if subset specified, clip the mosaic and set mosaic path to clipped shp
+        if 'subset_shp' in inputs:
+            out_shp_bn = os.path.basename(mosaic_path).replace('.shp', '_clipped.shp')
+            out_shp = os.path.join(out_dir, out_shp_bn)
+            cmd = 'ogr2ogr -clipsrc {clip_shp} {out_shp} {in_shp}'.format(clip_shp=subset_shp, out_shp=out_shp, in_shp=mosaic_path)
+            subprocess.call(cmd, shell=True)#'''
+            mosaic_path = out_shp
         mosaic_dataset = ogr.Open(mosaic_path)
         mosaic_ds = mosaic_dataset.GetLayer()
         min_x, max_x, min_y, max_y = mosaic_ds.GetExtent()
+        if 'resolution' not in inputs:
+            warnings.warn('Resolution not specified. Using default of 30...\n')
+        # If subset specified, just get sets that overlap the subset
         if 'subset_shp' in inputs:
             mosaic_geom = ogr.Geometry(ogr.wkbMultiPolygon)
             for feature in mosaic_ds:
@@ -120,8 +119,10 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         y_res = -resolution
         x_rot = 0
         y_rot = 0
-        mosaic_tx, extent = stem_conus.tx_from_shp(mosaic_path, x_res, y_res)
-        #df_tiles = attributes_to_df(mosaic_path)
+        if 'snap_coord' in train_inputs:
+            snap_coord = train_inputs['snap_coord'].replace('"','')
+            snap_coord = [float(c) for c in snap_coord.split(',')]#'''
+        mosaic_tx, extent = stem_conus.tx_from_shp(mosaic_path, x_res, y_res, snap_coord=snap_coord)
     
     else:
         mosaic_type = 'raster'
@@ -133,7 +134,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         driver = mosaic_ds.GetDriver()
         m_ulx, x_res, x_rot, m_uly, y_rot, y_res = mosaic_tx
     driver = gdal.GetDriverByName('gtiff')
-    
+        
     # If number of tiles not given, need to set it
     if 'n_tiles' not in inputs:
         print 'n_tiles not specified. Using default: 25 x 15 ...\n'
@@ -152,33 +153,12 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         print 'Predicting in parallel with %s jobs...' % n_jobs
         print 'Building args and making rasters of tile arrays...'
         for c, (set_id, row) in enumerate(df_sets.iterrows()):
-            
-            # Save rasters of tsa arrays ahead of time to avoid needing to pickle or fork mosaic
-            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-            '''if mosaic_type == 'vector':
-                tsa_ar, tsa_off = mosaic.kernel_from_shp(mosaic_ds, coords, mosaic_tx, nodata=0)
-            else:
-                tsa_ar, tsa_off = mosaic.extract_kernel(mosaic_ds, 1, coords,
-                                                        mosaic_tx, xsize, ysize,
-                                                        nodata=nodata)
-            set_mosaic_path = os.path.join(predict_dir, 'tsa_%s.tif' % set_id)
-            tx_out = row.ul_x, mosaic_tx[1], mosaic_tx[2], row.ul_y, mosaic_tx[4], mosaic_tx[5]
-            np_dtype = get_min_numpy_dtype(tsa_ar)
-            gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
-            mosaic.array_to_raster(tsa_ar, tx_out, prj, driver, set_mosaic_path, gdal_dtype, silent=True)
-            pct_progress = float(c + 1)/total_sets * 100
-            sys.stdout.write('\rRetreived points for feature %s of %s (%%%.1f)' % (c + 1, total_sets, pct_progress))
-            sys.stdout.flush()'''
-            
-            # Build list of args to pass to the Pool
-            #tsa_off = stem_conus.calc_offset((mosaic_tx[0], mosaic_tx[3]), (tx_out[0], tx_out[3]), tx_out)
-            if os.path.exists(os.path.join(predict_dir, 'prediction_%s.tif' % set_id)):
+            if os.path.exists(os.path.join(predict_dir, 'prediction_%s.tif' % set_id)) and not overwrite_sets:
                 continue
+            # Build list of args to pass to the Pool
+            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
             args.append([coords, mosaic_type, mosaic_path, mosaic_tx, prj, nodata, c, total_sets, set_id, df_var, xsize, ysize, row.dt_file, nodata, np.uint8, constant_vars, predict_dir])
-            
-            #args.append([c, total_sets, set_id, df_var, set_mosaic_path, tsa_off, coords, 
-                         #mosaic_tx, xsize, ysize, row.dt_file, nodata, np.uint8, 
-                         #constant_vars, predict_dir])
+
         print '%.1f minutes\n' % ((time.time() - t1)/60)
         p = Pool(n_jobs)
         p.map(stem_conus.par_predict, args, 1)
@@ -220,20 +200,16 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         if 'mosaic_nodata' in inputs: mosaic_nodata = int(mosaic_nodata)
         nodata_mask = mosaic_ds.ReadAsArray() != mosaic_nodata
     
-    ########################################################################################################################################
-    # jdb 6/22/17 check for sets that errored - if there are any, remove them from the df_sets DF so that the aggregation step doesn't expect them
-    '''if len(df_sets) != len(glob.glob(os.path.join(predict_dir, '*prediction*.tif'))):
+    #  check for sets that errored - if there are any, remove them from the df_sets DF so that the aggregation step doesn't expect them
+    if len(df_sets) != len(glob.glob(os.path.join(predict_dir, '*prediction*.tif'))):
         setErrorLog = os.path.dirname(predict_dir)+'/prediction_errors.txt'    
         if os.path.isfile(setErrorLog):   
           with open(setErrorLog) as f:
             lines = f.readlines()
-        
           badSets = [int(line.split(':')[1].rstrip().strip()) for line in lines if 'set_id' in line]
-          df_sets.drop(badSets, inplace=True)'''
-    ######################################################################################################################################## 
+          df_sets.drop(badSets, inplace=True)#'''
     
     pct_importance, df_sets = stem_conus.aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, mosaic_tx, support_size, agg_stats, predict_dir, df_sets, out_dir, file_stamp, prj, driver, n_jobs_agg)
-    #print 'Total aggregation time: %.1f hours\n' % ((time.time() - t0)/3600)
     mosaic_ds = None
     mosaic_dataset = None
     
