@@ -495,14 +495,14 @@ def tx_from_shp(shp, x_res, y_res, snap_coord=None):
     if snap_coord:
         snap_x, snap_y = snap_coord
         # Find distance to closest raster cell
-        x_snap_dist = ul_x % x_res - snap_x %  x_res
-        y_snap_dist = ul_y % y_res - snap_y % y_res
+        x_snap_dist = snap_x %  x_res - ul_x % x_res
+        y_snap_dist = snap_y % y_res - ul_y % y_res
         # Subtract from ul coord
-        ul_x -= x_snap_dist * (-x_res/x_res)
-        ul_y -= y_snap_dist * (-y_res/y_res)
+        ul_x += x_snap_dist
+        ul_y += y_snap_dist
         
     tx = ul_x, x_res, 0, ul_y, 0, y_res
-    
+
     return tx, (min_x, max_x, min_y, max_y)
     
     

@@ -53,7 +53,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     if target_col not in df_train.columns:
         raise NameError('target_col "%s" not in sample_txt: %s' % (target_col, sample_txt))
     
-    '''# Make a timestamped output directory if outdir not specified
+    # Make a timestamped output directory if outdir not specified
     now = datetime.now()
     date_str = str(now.date()).replace('-','')
     time_str = str(now.time()).replace(':','')[:4]
@@ -186,7 +186,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     #df_sets, set_txt = stem.write_model(out_dir, df_sets)
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
-    stamp = os.path.basename(out_dir)
+    '''stamp = os.path.basename(out_dir)
     set_txt = '/vol/v2/stem/conus/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
     df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
