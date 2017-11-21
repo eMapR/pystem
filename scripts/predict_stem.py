@@ -123,7 +123,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             snap_coord = train_inputs['snap_coord'].replace('"','')
             snap_coord = [float(c) for c in snap_coord.split(',')]#'''
         mosaic_tx, extent = stem.tx_from_shp(mosaic_path, x_res, y_res, snap_coord=snap_coord)
-    
+
     else:
         mosaic_type = 'raster'
         mosaic_ds = gdal.Open(mosaic_path)
