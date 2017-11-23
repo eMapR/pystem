@@ -214,7 +214,9 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
                 if min_sample:
                     this_sample_size = int(max(n_per_bin[i], min_sample))
                 if max_sample:
-                    this_sample_size = int(min(n_per_bin[i], max_sample))
+                    if max_sample < this_sample_size:
+                        this_sample_size = max_sample
+
             except:
                 import pdb; pdb.set_trace()
             print 'Sampling between %s and %s: %s pixels (%.1f%% of sample for this tile) ' % (this_min, this_max, this_sample_size, scaled_pcts[i] * 100)
