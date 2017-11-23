@@ -181,6 +181,8 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
     test_rows = []
     test_cols = []
     empty_tiles = []
+    classes = ['_%s' % b[1] for b in bins]
+    df_tiles = df_tiles.reindex(columns=df_tiles.columns.tolist() + classes, fill_value=0)
     for i, tile_coords in df_tiles_rc.iterrows():
         t1 = time.time()
         print 'Sampling for tile %s of %s...' % (i + 1, total_tiles)
@@ -205,6 +207,7 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
         ar_cols = ar_cols + ul_c
         
         n_per_bin, scaled_pcts = calc_strata_sizes(ar, nodata_mask, tile_coords.n_samples, bins, sampling_scheme, bin_scale, zero_inflation)
+        df_tiles.ix[i, classes] = n_per_bin #record sample size per bin
         
         for i, (this_min, this_max) in enumerate(bins):
             #t2 = time.time()
