@@ -10,6 +10,8 @@ import sys
 import time
 import shutil
 import warnings
+import sqlite3
+import sqlalchemy
 from datetime import datetime
 from osgeo import gdal, ogr
 import pandas as pd
@@ -77,24 +79,17 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     if snap_coord:
         snap_coord = [int(c) for c in snap_coord.split(',')]
     out_txt = os.path.join(out_dir, stamp + '.txt')
-    '''train_dict, df_sets, oob_dict = stem.get_gsrd(mosaic_path, cell_size, support_size,
-                                              sets_per_cell, df_train, min_obs,
-                                              target_col, predict_cols, out_txt,
-                                              gsrd_shp, pct_train, snap_coord=snap_coord)#'''
     df_sets = stem.get_gsrd(mosaic_path, cell_size, support_size,
                                               sets_per_cell, df_train, min_obs,
                                               target_col, predict_cols, out_txt,
                                               gsrd_shp, pct_train, snap_coord=snap_coord)
     n_sets = len(df_sets)            
-    '''out_dir = '/vol/v2/stem/conus/models/canopy_20171019_1520'
-    stamp = os.path.basename(out_dir)
-    oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
-    with open(oob_pkl, 'rb') as f:
-        oob_dict = pickle.load(f)
-    train_pkl = os.path.join(out_dir, '%s_train_dict.pkl' % stamp)
-    with open(train_pkl, 'rb') as f:
-        train_dict = pickle.load(f)
-    df_sets = pd.read_csv(os.path.join(out_dir, ))#'''
+    
+    # Create SQL DB and add train sample table
+    ''' Create DB and add support set table '''
+    db_path = os.path.join(out_dir, stamp + '.db')
+    engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
+    df_train.to_sql('train_sample', engine, chunksize=10000)
     
     # Train a tree for each support set
     t1 = time.time()
@@ -110,7 +105,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     for c in importance_cols:
         df_sets[c] = 0
     
-    # Train models
+    # Train estimators
     dropped_sets = pd.DataFrame(columns=df_sets.columns)
     dt_dir = os.path.join(out_dir, 'decisiontree_models')
     if not os.path.exists(dt_dir):
@@ -118,9 +113,17 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     dt_path_template = os.path.join(dt_dir, stamp + '_decisiontree_%s.pkl')
     oob_dict = {}
     oob_rates = [0]
-    for i, (ind, ss) in enumerate(df_sets.iterrows()):
-        format_obj = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, int(np.mean(oob_rates))
-        sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes. Avg oob: %s' % format_obj)
+    
+    # establish DB connection and create relationship table for sample inds
+    cmd = ('CREATE TABLE _sample_ind (set_id INTEGER, sample_id INTEGER, in_bag INTEGER)')
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(cmd)
+        connection.commit()
+    
+    insert_cmd = 'INSERT INTO _sample_ind (set_id, sample_id, in_bag) VALUES (?,?,?)'
+    for i, (set_id, ss) in enumerate(df_sets.iterrows()):
+        format_tuple = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, np.mean(oob_rates)
+        sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes. Avg OOB: %d' % format_tuple)
         sys.stdout.flush()
 
         # Get all samples within support set
@@ -131,30 +134,43 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         
         n_samples = int(len(sample_inds) * .63)
         if n_samples < min_obs:
-            df_sets.drop(ind, inplace=True)
+            df_sets.drop(set_id, inplace=True)
             continue
         
         this_x = x_train.ix[sample_inds]
         this_y = y_train.ix[sample_inds]
-        support_set = df_sets.ix[ind]
-        dt_path = dt_path_template % ind
+        support_set = df_sets.ix[set_id]
+        dt_path = dt_path_template % set_id
         dt_model, train_inds, oob_inds, importance, oob_metrics = stem.train_estimator(support_set, n_samples, this_x, this_y, model_func, model_type, max_features, dt_path)
         oob_rates.append(oob_metrics['oob_rate'])
-        df_sets.ix[ind, importance_cols] = importance
-        df_sets.ix[ind, 'dt_model'] = dt_model
-        df_sets.ix[ind, 'dt_file'] = dt_path
-        df_sets.ix[ind, 'n_samples'] = n_samples
+        df_sets.ix[set_id, importance_cols] = importance
+        df_sets.ix[set_id, 'dt_model'] = dt_model
+        df_sets.ix[set_id, 'dt_file'] = dt_path
+        df_sets.ix[set_id, 'n_samples'] = n_samples
         for metric in oob_metrics:
-            df_sets.ix[ind, metric] = oob_metrics[metric]
+            df_sets.ix[set_id, metric] = oob_metrics[metric]
         
         # Save oob and train inds #### Change to database structure
+        n_train = len(train_inds)
+        n_oob = len(oob_inds)
+        train_records = zip(np.full(n_train, set_id, dtype=int),
+                            train_inds,
+                            np.ones(n_train, dtype=np.uint8))
+        oob_records   = zip(np.full(n_oob, set_id, dtype=int),
+                            oob_inds,
+                            np.zeros(n_oob, dtype=np.uint8))
+        
+        with sqlite3.connect(db_path) as connection:
+            connection.executemany(insert_cmd, train_records + oob_records)
+            connection.commit()
+            
         t_ind_path = dt_path.replace('.pkl', '_train_inds.txt')
         with open(t_ind_path, 'w') as f:
             [f.write('%s\n' % ti) for ti in train_inds]
         o_ind_path = dt_path.replace('.pkl', '_oob_inds.txt')
         with open(o_ind_path, 'w') as f:
             [f.write('%s\n' % oi) for oi in oob_inds]
-        oob_dict[ind] = oob_inds
+        oob_dict[set_id] = oob_inds
 
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
@@ -182,8 +198,8 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     set_txt = os.path.join(dt_dir, stamp + '_support_sets.txt')
     df_sets['set_id'] = df_sets.index
     df_sets.drop('dt_model', axis=1).to_csv(set_txt, sep='\t', index=False)
+    df_sets.to_sql('support_sets', engine) # connection is still open
     t1 = time.time()
-    #df_sets, set_txt = stem.write_model(out_dir, df_sets)
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
     '''stamp = os.path.basename(out_dir)
