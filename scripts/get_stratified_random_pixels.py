@@ -96,6 +96,7 @@ def calc_proportional_area(df_tiles, shp):
             df_tiles.ix[i, 'area'] = area
         except:
             print 'Problem with tile', i
+
     df_tiles['pct_area'] = df_tiles.area/df_tiles.area.sum()
     
     ds = None
@@ -149,12 +150,15 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
             ' none specified in parameters file. Try re-running with' +\
             'nodata specified.')
     
-    # Buffer the array by 1 on each side to be able to extract 3x3 kernels
-    #ar = np.full([dim + 2 for dim in ar_data.shape], nodata, dtype=np.int32)
-    #ar[1:-1, 1:-1] = ar_data
+    # Split up the raster into tiles and figure out how 
+    print 'Calculating sample size per tile...'
+    t1 = time.time()
     xsize = ds.RasterXSize 
     ysize = ds.RasterYSize
     df_tiles, df_tiles_rc, tile_size = stem.get_tiles(n_tiles, xsize, ysize, tx)
+    total_tiles = len(df_tiles)
+    # If a boundary shapefile is given, calculate the proportional area within
+    #   each tile
     if boundary_shp:
         boundary_ds = ogr.Open(boundary_shp)
         boundary_lyr = boundary_ds.GetLayer()
@@ -162,20 +166,22 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
         df_tiles.drop(empty_tiles, inplace=True)
         df_tiles_rc.drop(empty_tiles, inplace=True)
         total_tiles = len(df_tiles)
-        
-    # If a boundary shapefile is given, calculate the proportional area within
-    #   each tile
-    total_tiles = len(df_tiles)
-    if not n_per_tile:
-        if boundary_shp:
-            calc_proportional_area(df_tiles, boundary_shp) # Calcs area in place
-            df_tiles_rc['n_samples'] = n_samples * df_tiles.pct_area
+        calc_proportional_area(df_tiles, boundary_shp) # Calcs area in place
+        if n_per_tile:
+            pct_area = df_tiles.pct_area
+            df_tiles['pct_max_sample'] = pct_area / (pct_area.max() - pct_area.min())
+            df_tiles_rc['n_samples'] = (n_per_tile * df_tiles.pct_max_sample).astype(int)
         else:
-            df_tiles_rc['n_samples'] = n_samples/total_tiles
+            df_tiles_rc['n_samples'] = n_samples * df_tiles.pct_area
     else:
-        df_tiles_rc['n_samples'] = n_per_tile
+        if n_per_tile:
+            df_tiles_rc['n_samples'] = n_per_tile
+        else:
+            df_tiles_rc['n_samples'] = float(n_samples)/total_tiles 
+    df_tiles['n_samples'] = df_tiles_rc.n_samples
+    print '%.1f minutes\n' % ((time.time() - t1)/60) 
     
-    # For each tile, get random samples for each bin
+    # For each tile, get random sample for each bin
     train_rows = []
     train_cols = []
     test_rows = []
@@ -183,9 +189,9 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
     empty_tiles = []
     classes = ['_%s' % b[1] for b in bins]
     df_tiles = df_tiles.reindex(columns=df_tiles.columns.tolist() + classes, fill_value=0)
-    for i, tile_coords in df_tiles_rc.iterrows():
+    for c, (i, tile_coords) in enumerate(df_tiles_rc.iterrows()):
         t1 = time.time()
-        print 'Sampling for tile %s of %s...' % (i + 1, total_tiles)
+        print 'Sampling for %d pixels for tile %s of %s...' % (tile_coords.n_samples, c + 1, total_tiles)
         if tile_coords.n_samples == 0:
             print '\tSkipping this tile because all pixels == nodata...\n'
             empty_tiles.append(i)
