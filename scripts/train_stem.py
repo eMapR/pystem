@@ -86,10 +86,12 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     n_sets = len(df_sets)            
     
     # Create SQL DB and add train sample table
-    ''' Create DB and add support set table '''
+    print 'Dumping train_txt to database...'
+    t1 = time.time()
     db_path = os.path.join(out_dir, stamp + '.db')
     engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
     df_train.to_sql('train_sample', engine, chunksize=10000)
+    print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Train a tree for each support set
     t1 = time.time()
@@ -111,16 +113,15 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     if not os.path.exists(dt_dir):
         os.mkdir(dt_dir)
     dt_path_template = os.path.join(dt_dir, stamp + '_decisiontree_%s.pkl')
-    oob_dict = {}
-    oob_rates = [0]
     
-    # establish DB connection and create relationship table for sample inds
-    cmd = ('CREATE TABLE _sample_ind (set_id INTEGER, sample_id INTEGER, in_bag INTEGER)')
+    # establish DB connection and create empty relationship table for sample inds
+    cmd = ('CREATE TABLE set_samples (set_id INTEGER, sample_id INTEGER, in_bag INTEGER);')
     with sqlite3.connect(db_path) as connection:
         connection.executescript(cmd)
         connection.commit()
+    insert_cmd = 'INSERT INTO set_samples (set_id, sample_id, in_bag) VALUES (?,?,?);'
     
-    insert_cmd = 'INSERT INTO _sample_ind (set_id, sample_id, in_bag) VALUES (?,?,?)'
+    oob_rates = [0]
     for i, (set_id, ss) in enumerate(df_sets.iterrows()):
         format_tuple = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, np.mean(oob_rates)
         sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes. Avg OOB: %d' % format_tuple)
@@ -155,29 +156,30 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         n_oob = len(oob_inds)
         train_records = zip(np.full(n_train, set_id, dtype=int),
                             train_inds,
-                            np.ones(n_train, dtype=np.uint8))
+                            np.ones(n_train, dtype=int))
         oob_records   = zip(np.full(n_oob, set_id, dtype=int),
                             oob_inds,
-                            np.zeros(n_oob, dtype=np.uint8))
+                            np.zeros(n_oob, dtype=int))
         
+        #try:
         with sqlite3.connect(db_path) as connection:
             connection.executemany(insert_cmd, train_records + oob_records)
             connection.commit()
             
-        t_ind_path = dt_path.replace('.pkl', '_train_inds.txt')
+        '''t_ind_path = dt_path.replace('.pkl', '_train_inds.txt')
         with open(t_ind_path, 'w') as f:
             [f.write('%s\n' % ti) for ti in train_inds]
         o_ind_path = dt_path.replace('.pkl', '_oob_inds.txt')
         with open(o_ind_path, 'w') as f:
             [f.write('%s\n' % oi) for oi in oob_inds]
-        oob_dict[set_id] = oob_inds
+        oob_dict[set_id] = oob_inds'''
 
-    print '%.1f minutes\n' % ((time.time() - t1)/60)
+    print '\n%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Calculate OOB rates and drop sets with too low OOB
     print 'Calculating OOB rates...'
     t1 = time.time()
-    df_sets, low_oob = stem.get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob)
+    df_sets, low_oob = stem.get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob)
     if len(low_oob) > 0:
         #df_sets.drop(low_oob.index, inplace=True)
         low_oob_shp = os.path.join(out_dir, 'low_oob_sets.shp')
@@ -197,8 +199,8 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     print 'Saving models...'
     set_txt = os.path.join(dt_dir, stamp + '_support_sets.txt')
     df_sets['set_id'] = df_sets.index
-    df_sets.drop('dt_model', axis=1).to_csv(set_txt, sep='\t', index=False)
-    df_sets.to_sql('support_sets', engine) # connection is still open
+    df_sets = df_sets.drop('dt_model', axis=1)#.to_csv(set_txt, sep='\t', index=False)
+    df_sets.to_sql('support_sets', engine)
     t1 = time.time()
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
@@ -210,10 +212,10 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     #    oob_dict = pickle.load(f)
     oob_dict = {}
     predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_brightness','delta_greenness','delta_nbr','delta_wetness', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
-    if make_oob_map:
+    if make_oob_map or oob_map_metric in inputs:
         # Check if oob_map params were specified. If not, set to defaults
-        if 'n_tiles' not in locals():
-            n_tiles = 90, 40
+        if 'n_tiles' not in inputs:
+            n_tiles = 40, 90
             print 'n_tiles not specified. Using default: %s x %s ...\n' % (n_tiles)
             
         else:
@@ -248,12 +250,12 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
             tx = ul_x, x_res, 0, ul_y, 0, y_res
         
         avg_dict, df_sets = stem.oob_map(ysize, xsize, 0, mask, n_tiles, tx,
-                                     support_size, oob_dict, df_sets, df_train, target_col,
+                                     support_size, db_path, df_sets, df_train, target_col,
                                      predict_cols, out_dir,
                                      stamp, prj, driver, oob_map_metric)
         df_sets.to_csv(set_txt, sep='\t')#'''
 
-        avg_oob = round(avg_dict['oob'], 1)
+        avg_oob = round(avg_dict[oob_map_metric], 1)
         avg_cnt = int(round(avg_dict['count'], 0))
         
         print '\nAverage OOB score: .................... %.1f' % avg_oob

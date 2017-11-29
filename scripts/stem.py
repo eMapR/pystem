@@ -13,6 +13,7 @@ import shutil
 import random
 import warnings
 import traceback
+import sqlite3
 from itertools import count as itertoolscount
 from random import sample as randomsample
 from string import ascii_lowercase
@@ -524,7 +525,7 @@ def get_gsrd(mosaic_path, cell_size, support_size, n_sets, df_train, min_obs, ta
     out_dir = os.path.dirname(out_txt)
     grid_shp = os.path.join(out_dir, 'gsrd_grid.shp')                         
     coords_to_shp(df_grid, extent_shp, grid_shp)
-    print 'Shapefile of support of grid cells written to:\n%s\n' % grid_shp
+    print 'Shapefile of GSRD grid cells written to:\n%s\n' % grid_shp
     
     # Get support sets
     y_size = int(support_size[0]/x_res) * x_res
@@ -597,7 +598,7 @@ def find_file(basepath, search_str, tile_str=None, path_filter=None):
                 raise IOError(('Cannot find tile directory with basepath %s '+\
                 'and tile_str %s or up to 10 leading zeros') % (basepath, tile_str))#'''
 
-        # Search the bp directory tree. If search_str is in a file, get the full path.
+        # Search the bp directory tree. If search_str matches a file, get the full path.
         tile_str = ('0000' + tile_str)[-4:]
         paths = []
         for root, dirs, files in os.walk(basepath, followlinks=True):
@@ -645,8 +646,8 @@ def train_estimator(support_set, n_samples, x_train, y_train, model_function, mo
     oob_y = y_train.ix[oob_inds]
     oob_metrics = calc_oob_metrics(dt_model, oob_y, oob_x, model_type)
     
-    #joblib.dump(dt_model, out_path)
-    write_decisiontree(dt_model, out_path)
+    joblib.dump(dt_model, out_path)
+    #write_decisiontree(dt_model, out_path)
     
     
     return dt_model, train_inds, oob_inds, importance, oob_metrics
@@ -766,9 +767,20 @@ def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier'):
         oob_metrics['oob_kappa'] = metrics.cohen_kappa_score(oob_response, oob_prediction)
         
     return oob_metrics
+
+
+'''def query_sample_ids(db_path, columns='*', set_id=None, oob=None, tbl_name='set_sample'):
     
+    where = ''
     
-def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob=0):
+    cmd = 'SELECT o FROM %(tbl_name)s'
+    if set_id != None:
+        cmd += ' WHERE set_id'
+    with sqlite.connect(db_path) as conncection:'''
+        
+
+    
+def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob=0):
     """
     Calculate the out-of-bag accuracy for each support set in `df_sets`
     
@@ -778,8 +790,8 @@ def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob
         DataFrame with support set info
     df_train : pandas DataFrame
         DataFrame of training sample
-    oob_dict : dict
-        Dictionary of sample indices indicating which samples are OOB for each support set in `df_sets`
+    db_path : dict
+        Full path to SQLite DB with 
     target_col : str
         string of the target column name
     predict_cols : list or array-like
@@ -796,19 +808,22 @@ def get_oob_rates(df_sets, df_train, oob_dict, target_col, predict_cols, min_oob
 
     """
     if 'oob_rate' not in df_sets.columns:
-        for i, row in df_sets.iterrows():
+        query = 'SELECT sample_id FROM _sample_ind WHERE set_id=? AND in_bag=?'
+        connection = sqlite3.connect(db_path)
+        for set_id, row in df_sets.iterrows():
             dt = row.dt_model
-            this_oob = df_train.ix[oob_dict[i]]
+            oob_inds = np.array(connection.execute(query, (set_id, 0)).fetchall()).ravel()
+            this_oob = df_train.ix[oob_inds]
             oob_response = this_oob[target_col]
             oob_predictors = this_oob[predict_cols]
             oob_rate = calc_oob_rate(dt, oob_response, oob_predictors)
-            df_sets.ix[i, 'oob_rate'] = oob_rate
+            df_sets.ix[set_id, 'oob_rate'] = oob_rate
     low_oob = df_sets[df_sets.oob_rate < min_oob]
     
     return df_sets, low_oob
 
 
-def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_dict, df_sets, df_train, val_col, var_cols, out_dir, file_stamp, prj, driver, oob_metric='oob_rate'):
+def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, db_path, df_sets, df_train, target_col, predict_cols, out_dir, file_stamp, prj, driver, oob_metric='oob_rate'):
     
     t0 = time.time()
     
@@ -825,15 +840,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
         os.mkdir(tile_dir)
     
     if 'oob_rate' not in df_sets.columns:
-        for i, row in df_sets.iterrows():
-            with open(row.dt_file) as f:
-                dt = pickle.load(f)
-            this_oob = df_train.ix[oob_dict[i]]
-            oob_response = this_oob[val_col]
-            oob_predictors = this_oob[var_cols]
-            df_sets.ix[i, 'oob_rate'] = calc_oob_rate(dt, oob_response, oob_predictors)#'''
-            oob_metric = 'oob_rate'
-    del oob_dict
+        get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols)
     empty_tiles = []
     for i, (tile_id, tile_coords) in enumerate(df_tiles.iterrows()):
         t1 = time.time()
@@ -880,7 +887,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, oob_di
             nrows = a_inds[1] - a_inds[0]
             ncols = a_inds[3] - a_inds[2]
             try:
-                ar_oob_rate = np.full((nrows, ncols), s_row.oob_rate, dtype=np.int16)
+                ar_oob_rate = np.full((nrows, ncols), s_row[oob_metric], dtype=np.int16)
             except:
                 import pdb; pdb.set_trace()
             
@@ -1314,7 +1321,7 @@ def important_features(dt, ar, nodata):
     return ar_out
   
   
-def find_empty_tiles(df, nodata_mask, tx, nodata=None):
+def find_empty_tiles(df, nodata_mask, tx, nodata=None, val_field=None):
     
     empty = []
     
@@ -1322,7 +1329,8 @@ def find_empty_tiles(df, nodata_mask, tx, nodata=None):
         ul_r, ul_c = calc_offset((tx[0], tx[3]), coords[['ul_x', 'ul_y']], tx)
         lr_r, lr_c = calc_offset((tx[0], tx[3]), coords[['lr_x', 'lr_y']], tx)
         if type(nodata_mask) == ogr.Layer:
-            this_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, coords, tx, nodata)
+            this_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, coords, tx, nodata, val_field)
+            this_mask = this_mask != nodata
         else:
             this_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
         
