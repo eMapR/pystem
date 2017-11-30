@@ -496,7 +496,7 @@ def tx_from_shp(shp, x_res, y_res, snap_coord=None):
     if snap_coord:
         snap_x, snap_y = snap_coord
         # Find distance to closest raster cell
-        x_snap_dist = snap_x %  x_res - ul_x % x_res
+        x_snap_dist = snap_x % x_res - ul_x % x_res
         y_snap_dist = snap_y % y_res - ul_y % y_res
         # Subtract from ul coord
         ul_x += x_snap_dist
@@ -842,7 +842,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, db_pat
     if 'oob_rate' not in df_sets.columns:
         get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols)
     empty_tiles = []
-    for i, (tile_id, tile_coords) in enumerate(df_tiles.iterrows()):
+    for i, (tile_id, tile_coords) in enumerate(df_tiles.ix[262:].iterrows()):
         t1 = time.time()
         print 'Aggregating for %s of %s tiles' % (i + 1, total_tiles)
         print 'Tile index: ', tile_id
@@ -1165,9 +1165,11 @@ def get_overlapping_sets(support_sets, geometry):
         set_geom = ogr.CreateGeometryFromWkt(wkt)
         set_geom.CloseRings()
         
-        if set_geom.Intersects(geometry):
+        # Can't just use ,Intersects() because if support set touches the boundary,
+        #   .Intersects() returns True
+        if set_geom.Intersection(geometry).GetArea() > 0:
             overlapping.append(set_id)
-    
+
     return support_sets.ix[overlapping]
         
         
