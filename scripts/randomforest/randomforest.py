@@ -12,8 +12,6 @@ from sklearn import ensemble
 from sklearn import metrics
 from matplotlib import pyplot as plt
 
-import stem
-
 def read_params(txt):
     '''
     Return a dictionary and a dataframe from parsed parameters in txt

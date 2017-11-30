@@ -1,7 +1,7 @@
 import os
 import sys
 import shutil
-import re
+import seaborn as sns
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
@@ -9,21 +9,18 @@ from matplotlib import style
 from datetime import datetime
 
 import randomforest as forest
+  
 
-
-style.use('ggplot')    
-
-def test(out_dir, x_train, y_train, max_trees, step):
+def test(out_dir, x_train, y_train, max_trees, step, min_trees=10):
     ''' Make a plot for sample_txt of number of trees vs OOB error rates '''
 
     print 'Testing OOB error rate per number of trees...'
     oob_errors = []
-    n_trees = range(50, max_trees + 1, step)
-    n_tests = max_trees / step
+    n_trees = range(min_trees, max_trees + 1, step)
+    n_tests = len(n_trees)
 
     for i, n in enumerate(n_trees):
         rf_model = forest.train_rf_regressor(x_train, y_train, ntrees=n)
-        #import pdb; pdb.set_trace()
         oob_errors.append(1 - rf_model.oob_score_)
         print 'Testing %s of %s models with %s trees: %.3f' % (i + 1, n_tests, n, rf_model.oob_score_)
 
