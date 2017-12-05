@@ -193,17 +193,23 @@ def get_offset_array_indices(ar1_shape, ar2_shape, ar2_offset):
     return ar1_bounds, ar2_bounds
     
 
-def kernel_from_shp(mosaic_lyr, coords, mosaic_tx, nodata, val_field='name'):
+def kernel_from_shp(mosaic_lyr, feature, mosaic_tx, nodata, val_field='name', return_mask=False):
     
     # Get rid of the annoying warning about spatial refs when rasterizing
     gdal.PushErrorHandler('CPLQuietErrorHandler')
     
     ul_x, x_res, _, ul_y, _, y_res = mosaic_tx
 
-    #wkt = 'POLYGON (({0} {1}, {2} {3}, {4} {5}, {6} {7}))'.format(coords.ul_x,coords.ul_y, coords.lr_x, coords.ul_y, coords.lr_x, coords.lr_y, coords.ul_x, coords.lr_y)
-    wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}))'.format(coords.ul_x,coords.ul_y, coords.lr_x, coords.lr_y)
-    support_set = ogr.CreateGeometryFromWkt(wkt)
-    support_set.CloseRings()
+    #wkt = 'POLYGON (({0} {1}, {2} {3}, {4} {5}, {6} {7}))'.format(feature.ul_x,feature.ul_y, feature.lr_x, feature.ul_y, feature.lr_x, feature.lr_y, feature.ul_x, feature.lr_y)
+    if isinstance(feature, pd.core.frame.Series):
+        wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}))'.format(feature.ul_x,feature.ul_y, feature.lr_x, feature.lr_y)
+        support_set = ogr.CreateGeometryFromWkt(wkt)
+        support_set.CloseRings()
+    elif type(feature) == int:
+        set_feature = mosaic_lyr.GetFeature(feature)
+        support_set = set_feature.GetGeometryRef()
+    else:
+        raise TypeError('feature type not understood. Need pd.Series or int, got %s' % type(feature))
 
     ''' figure out a better way to compute intersection than looping though'''
     #intersection = ogr.Geometry(ogr.wkbMultiPolygon)
@@ -246,26 +252,31 @@ def kernel_from_shp(mosaic_lyr, coords, mosaic_tx, nodata, val_field='name'):
     tx = x1, x_res, 0, y2, 0, y_res #Assumes x > to the east, y > north
     offset = calc_offset((m_xmin, m_ymax), tx)
     
-    ''' Figuer out how to burn nodata values directly with Rasterize() rather than with mask'''
-    
-    ds_ras = ras_driver.Create('', cols, rows, 1, gdal.GDT_Int32)
-    ds_mask = ras_driver.Create('', cols, rows, 1, gdal.GDT_Byte)
-    ds_ras.SetGeoTransform(tx)
-    ds_mask.SetGeoTransform(tx)
-    gdal.RasterizeLayer(ds_ras, [1], intersection_lyr, options=["ATTRIBUTE=%s" % val_field])
-    gdal.RasterizeLayer(ds_mask, [1], intersection_lyr, burn_values=[1])
-    ar = ds_ras.ReadAsArray()
-    mask = ds_mask.ReadAsArray().astype(bool)
-    ar[~mask] = nodata
-    ds_ras = None
-    ds_mask = None
-    ds_mem.Destroy()
-
     _, array_inds = get_offset_array_indices((ysize, xsize), (rows, cols), offset)
     ul_row, ar_row_lr, ar_col_ul, ar_col_lr = array_inds
-    offset = array_inds[2], array_inds[0]
+    
+    ds_mask = ras_driver.Create('', cols, rows, 1, gdal.GDT_Byte)
+    ds_mask.SetGeoTransform(tx)
+    gdal.RasterizeLayer(ds_mask, [1], intersection_lyr, burn_values=[1])
+    mask = ds_mask.ReadAsArray().astype(bool)
+    if return_mask:
+        ds_mask, support_set, feature = None, None, None
+        return mask, (array_inds[2], array_inds[0])
+        
+    ds_ras = ras_driver.Create('', cols, rows, 1, gdal.GDT_Int32)
+    ds_ras.SetGeoTransform(tx)
+    if val_field:
+        gdal.RasterizeLayer(ds_ras, [1], intersection_lyr, options=["ATTRIBUTE=%s" % val_field])
+    else:
+        gdal.RasterizeLayer(ds_ras, [1], intersection_lyr, burn_values=[1])
+    ar = ds_ras.ReadAsArray()
+    ar[~mask] = nodata
+    ds_ras, ds_mask, support_set, feature = None, None, None, None
+    ds_mem.Destroy()
+    _, array_inds = get_offset_array_indices((ysize, xsize), (rows, cols), offset)
+    ul_row, ar_row_lr, ar_col_ul, ar_col_lr = array_inds
 
-    return ar, offset
+    return ar, (array_inds[2], array_inds[0])
     
     
 def extract_kernel(ds, data_band, ar_coords, tx, xsize, ysize, nodata=0):
