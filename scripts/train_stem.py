@@ -124,7 +124,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     oob_rates = [0]
     for i, (set_id, ss) in enumerate(df_sets.iterrows()):
         format_tuple = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, np.mean(oob_rates)
-        sys.stdout.write('\rTraining %s of %s decision trees (%.1f%%). Cumulative time: %.1f minutes. Avg OOB: %d' % format_tuple)
+        sys.stdout.write('\rTraining %s/%s DTs (%.1f%%) || %.1f minutes || Avg OOB: %d' % format_tuple)
         sys.stdout.flush()
 
         # Get all samples within support set
@@ -151,7 +151,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         for metric in oob_metrics:
             df_sets.ix[set_id, metric] = oob_metrics[metric]
         
-        # Save oob and train inds #### Change to database structure
+        # Save oob and train inds
         n_train = len(train_inds)
         n_oob = len(oob_inds)
         train_records = zip(np.full(n_train, set_id, dtype=int),
@@ -165,14 +165,6 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         with sqlite3.connect(db_path) as connection:
             connection.executemany(insert_cmd, train_records + oob_records)
             connection.commit()
-            
-        '''t_ind_path = dt_path.replace('.pkl', '_train_inds.txt')
-        with open(t_ind_path, 'w') as f:
-            [f.write('%s\n' % ti) for ti in train_inds]
-        o_ind_path = dt_path.replace('.pkl', '_oob_inds.txt')
-        with open(o_ind_path, 'w') as f:
-            [f.write('%s\n' % oi) for oi in oob_inds]
-        oob_dict[set_id] = oob_inds'''
 
     print '\n%.1f minutes\n' % ((time.time() - t1)/60)
     
@@ -196,21 +188,19 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     print '%.1f minutes\n' % ((time.time() - t1)/60)
 
     # Write df_sets and each decison tree to disk
-    print 'Saving models...'
-    set_txt = os.path.join(dt_dir, stamp + '_support_sets.txt')
+    print 'Saving support set info...'
+    #set_txt = os.path.join(dt_dir, stamp + '_support_sets.txt')
     df_sets['set_id'] = df_sets.index
-    df_sets = df_sets.drop('dt_model', axis=1)#.to_csv(set_txt, sep='\t', index=False)
-    df_sets.to_sql('support_sets', engine)
+    #df_sets = df_sets.drop('dt_model', axis=1)#.to_csv(set_txt, sep='\t', index=False)
+    df_sets.drop('dt_model', axis=1).to_sql('support_sets', engine)
     t1 = time.time()
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
     '''stamp = os.path.basename(out_dir)
-    set_txt = '/vol/v2/stem/conus/models/{1}/decisiontree_models/{1}_support_sets.txt'.format(target_col, stamp) 
-    df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
-    oob_pkl = os.path.join(out_dir, '%s_oob_dict.pkl' % stamp)
-    #with open(oob_pkl, 'rb') as f:
-    #    oob_dict = pickle.load(f)
-    oob_dict = {}
+    db_path = os.path.join(out_dir, stamp + '.db')
+    engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
+    with engine.connect() as con, con.begin():
+        df_sets = pd.read_sql_table('support_sets', con, index_col='set_id')
     predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_brightness','delta_greenness','delta_nbr','delta_wetness', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
     if make_oob_map or oob_map_metric in inputs:
         # Check if oob_map params were specified. If not, set to defaults
