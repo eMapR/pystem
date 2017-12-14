@@ -5,24 +5,34 @@ Predict from a spatiotemporal exploratory model
 @author: Sam Hooper, samhooperstudio@gmail.com
 
 """
-import glob
-import time
 import os
 import sys
+import glob
+import time
+import fnmatch
 import subprocess
 import shutil
 import warnings
+import sqlalchemy
 import pandas as pd
 import cPickle as pickle
 from osgeo import gdal, ogr, gdal_array
+from sklearn.externals import joblib
 from multiprocessing import Pool
 import numpy as np
 
 import stem
+from evaluation.evaluation import feature_to_mask
 import mosaic_by_tsa as mosaic
-from lthacks import get_min_numpy_dtype, attributes_to_df
     
 gdal.UseExceptions()
+
+'''
+TODO: 
+-try predicting each set within a tile per thread
+-add support for generic on-the-fly tiles if user doesn't want to use 
+mosaic_shp tiles
+'''
 
 
 def parse_constant_vars(constant_vars):
@@ -34,8 +44,15 @@ def parse_constant_vars(constant_vars):
     
     return var_dict
 
+
+def parallel_helper(n_jobs, df_var, tile_str, tile_ul, mosaic_tx, overlapping_sets, agg_stats, inds):
+    return joblib.Parallel(n_jobs=n_jobs, verbose=5, backend="threading")(
+joblib.delayed(stem.predict_pixel)
+            (df_var, tile_str, tile_ul, mosaic_tx, pixel_inds, overlapping_sets, agg_stats) for pixel_inds in inds)
+
     
-def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs_pred=0, n_jobs_agg=0, mosaic_nodata=0, snap_coord=None, overwrite_sets=False):
+
+def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs=0, n_jobs_agg=0, mosaic_nodata=0, snap_coord=None, overwrite_tiles=False, tile_id_field='name'):
     inputs, df_var = stem.read_params(params)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])    
@@ -84,13 +101,21 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     if not os.path.exists(mosaic_path):
         sys.exit('mosaic_path does not exist:\n%s' % mosaic_path)
     
-    
     predict_dir = os.path.join(out_dir, 'decisiontree_predictions')
     if not os.path.exists(predict_dir):
         os.mkdir(predict_dir)
     
-    set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
-    df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
+    if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
+    db_path = os.path.join(model_dir, file_stamp + '.db')
+    try:
+        engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
+        with engine.connect() as con, con.begin():
+            df_sets = pd.read_sql_table('support_sets', con, index_col='set_id')#'''
+    except:
+        set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
+        if not os.path.isfile(set_txt):
+            raise IOError('No database or support set txt file found')
+        df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
     
     if mosaic_path.endswith('.shp'):
         mosaic_type = 'vector'
@@ -123,7 +148,8 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             snap_coord = train_inputs['snap_coord'].replace('"','')
             snap_coord = [float(c) for c in snap_coord.split(',')]#'''
         mosaic_tx, extent = stem.tx_from_shp(mosaic_path, x_res, y_res, snap_coord=snap_coord)
-
+        tiles = stem.attributes_to_df(mosaic_path) # Change to accept arbittary geometry
+        
     else:
         mosaic_type = 'raster'
         mosaic_ds = gdal.Open(mosaic_path)
@@ -133,7 +159,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         prj = mosaic_ds.GetProjection()
         driver = mosaic_ds.GetDriver()
         m_ulx, x_res, x_rot, m_uly, y_rot, y_res = mosaic_tx
-    driver = gdal.GetDriverByName('gtiff')
+    #driver = gdal.GetDriverByName('gtiff')
         
     # If number of tiles not given, need to set it
     if 'n_tiles' not in inputs:
@@ -141,77 +167,113 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         n_tiles = 90, 40
     else:
         n_tiles = [int(i) for i in n_tiles.split(',')]
-    df_tiles, df_tiles_rc, tile_size = stem.get_tiles(n_tiles, xsize, ysize, mosaic_tx)
+    #df_tiles, df_tiles_rc, tile_size = stem.get_tiles(n_tiles, xsize, ysize, mosaic_tx)
     
     total_sets = len(df_sets)
     t0 = time.time()
-    if 'n_jobs_pred' in inputs:
-        n_jobs = int(n_jobs_pred)
-        # Predict in parallel
-        args = []
-        t1 = time.time()
-        print 'Predicting in parallel with %s jobs...' % n_jobs
-        print 'Building args and making rasters of tile arrays...'
-        for c, (set_id, row) in enumerate(df_sets.iterrows()):
-            if os.path.exists(os.path.join(predict_dir, 'prediction_%s.tif' % set_id)) and not overwrite_sets:
-                continue
-            # Build list of args to pass to the Pool
-            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-            args.append([coords, mosaic_type, mosaic_path, mosaic_tx, prj, nodata, c, total_sets, set_id, df_var, xsize, ysize, row.dt_file, nodata, np.uint8, constant_vars, predict_dir])
-
-        print '%.1f minutes\n' % ((time.time() - t1)/60)
-        p = Pool(n_jobs)
-        p.map(stem.par_predict, args, 1)
-        p.close()
-        p.join()
-
+    last_dts = pd.Series()
+    agg_stats = [s.strip().lower() for s in agg_stats.split(',')]
+    n_jobs = int(n_jobs)
+    tile_dir = os.path.join(model_dir, 'temp_tiles')
+    #tile_dir = '/home/server/pi/homes/shooper/delete_test'
+    if not os.path.isdir(tile_dir):
+        os.mkdir(tile_dir)
+    tile_path_template = os.path.join(tile_dir, 'tile_{tile_id}_%(stat)s.tif')
+    n_tiles = len(tiles)
+    
+    if not overwrite_tiles:
+        files = os.listdir(tile_dir)
+        tile_files = pd.DataFrame(columns=agg_stats, index=tiles[tile_id_field])
+        for stat in agg_stats:
+            stat_match = [f.split('_')[1] for f in fnmatch.filter(files, 'tile*%s.tif' % stat)]
+            tile_files[stat] = pd.Series(np.ones(len(stat_match)), index=stat_match)
+        index_field = tiles.index.name
+        tiles[index_field] = tiles.index
+        tiles = tiles.set_index(tile_id_field, drop=False)[tile_files.isnull().any(axis=1)]
+        tiles.set_index(index_field, inplace=True)
+    
+    tiles['ul_x'] = [stem.get_ul_coord(xmin, xmax, x_res) 
+                    for i, (xmin, xmax) in tiles[['xmin','xmax']].iterrows()]
+    tiles['ul_y'] = [stem.get_ul_coord(ymin, ymax, y_res) 
+                    for i, (ymin, ymax) in tiles[['ymin','ymax']].iterrows()]
+    tiles['lr_x'] = [xmax if ulx == xmin else xmin for i, (ulx, xmin, xmax)
+                    in tiles[['ul_x', 'xmin','xmin']].iterrows()]
+    tiles['lr_y'] = [ymax if uly == ymin else ymin for i, (uly, ymin, ymax) 
+                    in tiles[['ul_y', 'ymin','ymin']].iterrows()]
+    
+    support_nrows = int(support_size[0]/abs(y_res))
+    support_ncols = int(support_size[1]/abs(x_res))
+    t1 = time.time()
+    #args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles[tiles['name'].isin(['1771', '3224', '0333', '0558'])].iterrows())]    
+    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.iterrows())]
+    
+    if n_jobs > 1:
+        print 'Predicting with %s jobs...\n' % n_jobs
+        pool = Pool(n_jobs)
+        pool.map(stem.par_predict_tile, args, 1)
+        pool.close()
+        pool.join()
     else:
-        # Loop through each set and generate predictions
-        for c, (set_id, row) in enumerate(df_sets.iterrows()):
-            t1 = time.time()
-            with open(row.dt_file, 'rb') as f: 
-                dt_model = pickle.load(f)
-            print '\nPredicting for set %s of %s' % (c + 1, total_sets)
-            coords = row[['ul_x', 'ul_y', 'lr_x', 'lr_y']]
-            ar_predict = stem.predict_set(set_id, df_var, mosaic_ds, coords, 
-                                     mosaic_tx, xsize, ysize, dt_model, nodata,
-                                     np.int16, constant_vars)        
-            tx = coords.ul_x, x_res, x_rot, coords.ul_y, y_rot, y_res
-            out_path = os.path.join(predict_dir, 'prediction_%s.tif' % set_id)
-            np_dtype = get_min_numpy_dtype(ar_predict)
-            gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(np_dtype)
-            mosaic.array_to_raster(ar_predict, tx, prj, driver, out_path, gdal.GDT_Byte, nodata=nodata)
-            print 'Total time for this set: %.1f minutes' % ((time.time() - t1)/60)
-    
-        #mosaic = None                  
-    print '\nTotal time for predicting: %.1f hours\n' % ((time.time() - t0)/3600)#''' """
-    
-    #Aggregate predictions by tile and stitch them back together
-    if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
+        for arg in args:
+            print 'Predicting with 1 job ...\n'
+            stem.par_predict_tile(arg)#'''
+    print '\n\nFinished predicting in %.1f hours. \n\nStitching tiles...' % ((time.time() - t1)/3600)
     
     t1 = time.time()
-    agg_stats = [s.strip().lower() for s in agg_stats.split(',')]
-    if 'n_jobs_agg' in inputs:
-        n_jobs_agg = int(n_jobs_agg)
+    mosaic_ul = mosaic_tx[0], mosaic_tx[3]
+    driver = gdal.GetDriverByName('gtiff')
+    for stat in agg_stats:
+        if stat == 'stdv':
+            this_nodata = -9999
+            ar = np.full((ysize, xsize), this_nodata, dtype=np.int16) 
+        else:
+            this_nodata = nodata
+            ar = np.full((ysize, xsize), this_nodata, dtype=np.uint8)
+        
+        for tile_id, tile_coords in tiles.iterrows():
+            tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_coords[tile_id_field], stat))
+            ds = gdal.Open(tile_file)
+            tile_tx = ds.GetGeoTransform()
+            tile_ul = tile_tx[0], tile_tx[3]
+            row_off, col_off = stem.calc_offset(mosaic_ul, tile_ul, mosaic_tx)
+            # Make sure the tile doesn't exceed the size of ar
+            tile_rows = min(ds.RasterYSize + row_off, ysize) - row_off
+            tile_cols = min(ds.RasterXSize + col_off, xsize) - col_off
+            ar_tile = ds.ReadAsArray(0, 0, tile_cols, tile_rows)
+            try:
+                ar[row_off : row_off + tile_rows, col_off : col_off + tile_cols] = ar_tile
+            except Exception as e:
+                import pdb; pdb.set_trace()
+        
+        out_path = os.path.join(model_dir, '%s_%s.tif' % (file_stamp, stat))
+        #out_path = os.path.join('/home/server/pi/homes/shooper/delete_test', '%s_%s.tif' % (file_stamp, stat))
+        gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(ar.dtype)
+        mosaic.array_to_raster(ar, mosaic_tx, prj, driver, out_path, gdal_dtype, nodata=this_nodata)
     
-    if mosaic_type == 'vector':
-        nodata_mask = mosaic_ds
+    # Clean up the tiles
+    shutil.rmtree(tile_dir)
+    print 'Time for stitching: %.1f minutes\n' % ((time.time() - t1)/60)
+    
+    # Get feature importances and max importance per set
+    t1 = time.time()
+    print 'Getting importance values...'
+    importance_cols = sorted([c for c in df_sets.columns if 'importance' in c])
+    df_sets['max_importance'] = nodata
+    if len(importance_cols) == 0:
+        # Loop through and get importance
+        importance_per_var = []
+        for s, row in df_sets.iterrows():
+            with open(row.dt_file, 'rb') as f: 
+                dt_model = pickle.load(f)
+            max_importance, this_importance = stem.get_max_importance(dt_model)
+            df_sets.ix[s, 'max_importance'] = max_importance
+            importance_per_var.append(this_importance)
+        importance = np.array(importance_per_var).mean(axis=0)
     else:
-        if 'mosaic_nodata' in inputs: mosaic_nodata = int(mosaic_nodata)
-        nodata_mask = mosaic_ds.ReadAsArray() != mosaic_nodata
-    
-    #  check for sets that errored - if there are any, remove them from the df_sets DF so that the aggregation step doesn't expect them
-    if len(df_sets) != len(glob.glob(os.path.join(predict_dir, '*prediction*.tif'))):
-        setErrorLog = os.path.dirname(predict_dir)+'/prediction_errors.txt'    
-        if os.path.isfile(setErrorLog):   
-          with open(setErrorLog) as f:
-            lines = f.readlines()
-          badSets = [int(line.split(':')[1].rstrip().strip()) for line in lines if 'set_id' in line]
-          df_sets.drop(badSets, inplace=True)#'''
-    
-    pct_importance, df_sets = stem.aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, mosaic_tx, support_size, agg_stats, predict_dir, df_sets, out_dir, file_stamp, prj, driver, n_jobs_agg)
-    mosaic_ds = None
-    mosaic_dataset = None
+        df_sets['max_importance'] = np.argmax(df_sets[importance_cols].values, axis=1)
+        importance = df_sets[importance_cols].mean(axis=0).values
+    pct_importance = importance / importance.sum()
+    print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Save the importance values
     importance = pd.DataFrame({'variable': pred_vars,
@@ -281,41 +343,8 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         print '\n"confusion_params" was not specified.' +\
             ' This model will not be evaluated...' #'''
     
-    print '\nTotal prediction runtime: %.1f\n' % ((time.time() - t0)/60)
+    print '\nTotal prediction runtime: %.1f hours\n' % ((time.time() - t0)/3600)
 
 if __name__ == '__main__':
     params = sys.argv[1]
     sys.exit(main(params))#'''
-
-
-''' ############# Testing ################ '''
-#sample_txt = '/vol/v2/stem/canopy/samples/canopy_sample3000_20160122_1600_predictors.txt'
-#target_col = 'value'
-#mosaic_path = '/vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq'
-#tsa_txt = '/vol/v2/stem/scripts/tsa_orwaca.txt'
-#cell_size = (300000, 200000)
-#support_size = (400000, 300000)
-#sets_per_cell = 10
-#min_obs = 25
-#pct_train = .63
-#target_col = 'canopy'
-#n_tiles = 10
-#out_dir = '/vol/v2/stem/canopy/models/'
-#set_id, ar, df_sets, df_train = main(sample_txt, target_col, mosaic_path, cell_size, support_size, sets_per_cell, min_obs, pct_train, target_col, n_tiles, out_dir)
-
-#params = '/vol/v2/stem/param_files/build_stem_params_nomse.txt'
-#predictions, df_sets, df_train = main(params)
-#stuff = main(params)
-'''set_txt = '/vol/v2/stem/canopy/outputs/canopy_20160212_2016/decisiontree_models/canopy_20160212_2016_support_sets.txt'
-df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
-tsa_ar = predict_set_from_disk(df_sets, 341, params)'''
-
-'''tile_size = [size * 30 for size in tile_size]
-shp = '/vol/v2/stem/extent_shp/orwaca.shp'
-coords, extent = gsrd.get_coords(shp)
-gsrd.plot_sets_on_shp(coords, 900, sets[20][1], (400000, 300000), df_tiles.ix[sets[20][0]], tile_size)'''
-#for s in sets:
-#    print 'Number of sets: ', len(s)
-#    coords, extent = gsrd.get_coords(shp)
-#    gsrd.plot_sets_on_shp(coords, 500, s, support_size)
-

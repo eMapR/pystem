@@ -14,6 +14,8 @@ import random
 import warnings
 import traceback
 import sqlite3
+import operator
+import re
 from itertools import count as itertoolscount
 from random import sample as randomsample
 from string import ascii_lowercase
@@ -21,11 +23,11 @@ from osgeo import gdal, ogr, gdal_array
 from sklearn import tree, metrics
 from sklearn.externals import joblib
 from multiprocessing import Pool
+import matplotlib
 import matplotlib.pyplot as plt
 import cPickle as pickle
 import pandas as pd
 import numpy as np
-import pdb
 
 # Import ancillary scripts
 import mosaic_by_tsa
@@ -476,13 +478,29 @@ def plot_sets_on_shp(ds_coords, max_size, df_sets, support_size, out_dir=None, f
         plt.show()
 
 
-def tx_from_shp(shp, x_res, y_res, snap_coord=None):
+def snap_coordinate(coord, snap_coord, res):
+    
+    snapped = coord + (snap_coord % res - coord % res)
+
+    return snapped
+
+
+def tx_from_shp(lyr, x_res, y_res, snap_coord=None, fid=None):
     ''' Return a GeoTransform of a shapefile if it were rasterized '''
     
-    ds = ogr.Open(shp)
-    lyr = ds.GetLayer()
-    min_x, max_x, min_y, max_y = lyr.GetExtent()
-    
+    if isinstance(lyr, str):
+        ds = ogr.Open(lyr)
+        lyr = ds.GetLayer()
+    if fid is not None:
+        feature = lyr.GetFeature(fid)
+        if not feature:
+            warnings.warn('No feature with FID %s. Returning transform for whole vecotr layer' % fid)
+        geom = feature.GetGeometryRef()
+        min_x, max_x, min_y, max_y = geom.GetEnvelope()
+        geom, feature = None, None
+    else:
+        min_x, max_x, min_y, max_y = lyr.GetExtent()
+
     if x_res > 0:
         ul_x = min_x
     else:
@@ -496,11 +514,13 @@ def tx_from_shp(shp, x_res, y_res, snap_coord=None):
     if snap_coord:
         snap_x, snap_y = snap_coord
         # Find distance to closest raster cell
-        x_snap_dist = snap_x % x_res - ul_x % x_res
-        y_snap_dist = snap_y % y_res - ul_y % y_res
+        #x_snap_dist = snap_x % x_res - ul_x % x_res
+        #y_snap_dist = snap_y % y_res - ul_y % y_res
         # Subtract from ul coord
-        ul_x += x_snap_dist
-        ul_y += y_snap_dist
+        #ul_x += x_snap_dist
+        #ul_y += y_snap_dist
+        ul_x = snap_coordinate(ul_x, snap_x, x_res)
+        ul_y = snap_coordinate(ul_y, snap_y, y_res)
         
     tx = ul_x, x_res, 0, ul_y, 0, y_res
 
@@ -629,30 +649,8 @@ def find_file(basepath, search_str, tile_str=None, path_filter=None):
         'search_str {2}\n').format(tile_str, basepath, search_str))
     
     return paths[0]
-
-
-def train_estimator(support_set, n_samples, x_train, y_train, model_function, model_type, max_features, out_path):
-    '''
-    Train an decision tree and write to out_path
-    '''
-    train_inds = random.sample(x_train.index, n_samples)
-    oob_inds = x_train.index[~x_train.index.isin(train_inds)]
-    bootstrap_x = x_train.ix[train_inds]
-    bootstrap_y = y_train.ix[train_inds]
-    dt_model = model_function(bootstrap_x, bootstrap_y, max_features)
-    importance = dt_model.feature_importances_
-    
-    oob_x = x_train.ix[oob_inds]
-    oob_y = y_train.ix[oob_inds]
-    oob_metrics = calc_oob_metrics(dt_model, oob_y, oob_x, model_type)
-    
-    joblib.dump(dt_model, out_path)
-    #write_decisiontree(dt_model, out_path)
     
     
-    return dt_model, train_inds, oob_inds, importance, oob_metrics
-
-
 def fit_tree_classifier(x_train, y_train, max_features=None):
     ''' Train a decision tree classifier '''
     if not max_features: max_features=None
@@ -746,7 +744,7 @@ def calc_oob_rate(dt, oob_response, oob_predictors, model_type='classifier'):
     return oob_rate
     
     
-def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier'):
+def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier', max_val=100):
     '''
     Return the Out of Bag accuracy rate for the decision tree, dt, and the
     Out of Bag samples, oob_response
@@ -754,13 +752,18 @@ def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier'):
     
     oob_prediction = dt.predict(oob_predictors)
     oob_metrics = {}
-    # If the model is a regressor, calculate the R squared
+    # If the model is a regressor, calculate the R squared and RMSE
     if model_type.lower() == 'regressor':
         oob_rate = metrics.r2_score(oob_response, oob_prediction)
+        # For rmse, subtract from max val so that scale mataches other oob metrics
+        try:
+            oob_rmspe = (max_val - stats_functions.rmse(oob_response, oob_prediction))/max_val
+        except ZeroDivisionError:
+            oob_rmspe = max_val - stats_functions.rmse(oob_response, oob_prediction)
         oob_metrics['oob_rate'] = int(round(oob_rate * 100, 0))
-        oob_metrics['oob_rmse'] = stats_functions.rmse(oob_response, oob_prediction)
+        oob_metrics['oob_rmse'] = int(round(oob_rmspe))
     
-    # Otherwise, get the percent correct
+    # Otherwise, get the percent correct and kappa
     else:
         oob_rate = metrics.accuracy_score(oob_response, oob_prediction)
         oob_metrics['oob_rate'] = int(round(oob_rate * 100, 0))
@@ -768,6 +771,77 @@ def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier'):
         
     return oob_metrics
 
+
+def train_estimator(support_set, n_samples, x_train, y_train, model_function, model_type, max_features, out_path, max_val):
+    '''
+    Train an decision tree and write to out_path
+    '''
+    train_inds = random.sample(x_train.index, n_samples)
+    oob_inds = x_train.index[~x_train.index.isin(train_inds)]
+    bootstrap_x = x_train.ix[train_inds]
+    bootstrap_y = y_train.ix[train_inds]
+    dt_model = model_function(bootstrap_x, bootstrap_y, max_features)
+    importance = dt_model.feature_importances_
+    
+    oob_x = x_train.ix[oob_inds]
+    oob_y = y_train.ix[oob_inds]
+    oob_metrics = calc_oob_metrics(dt_model, oob_y, oob_x, model_type, max_val)
+    
+    joblib.dump(dt_model, out_path)
+    #write_decisiontree(dt_model, out_path)
+    
+    return dt_model, train_inds, oob_inds, importance, oob_metrics
+
+
+def par_train_estimator(i, n_sets, start_time, df_train, predict_cols, target_col, min_obs, support_set, model_func, model_type, max_features, dt_path_template, db_path, max_val):
+    """ train a single estimator as a member of a queue in parallel """
+    
+    format_tuple = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - start_time)/60
+    sys.stdout.write('\rTraining %s/%s DTs (%.1f%%) || %.1f minutes' % format_tuple)
+    sys.stdout.flush()
+
+    # Get all samples within support set
+    sample_inds = df_train.index[(df_train['x'] > support_set[['ul_x', 'lr_x']].min()) &
+    (df_train['x'] < support_set[['ul_x', 'lr_x']].max()) &
+    (df_train['y'] > support_set[['ul_y', 'lr_y']].min()) &
+    (df_train['y'] < support_set[['ul_y', 'lr_y']].max())]
+    
+    n_samples = int(len(sample_inds) * .63)
+    if n_samples < min_obs:
+        return support_set, pd.DataFrame()
+    
+    set_id = support_set.name
+    x_train = df_train.ix[sample_inds, predict_cols]
+    y_train = df_train.ix[sample_inds, target_col]
+    dt_path = dt_path_template % set_id
+    dt_model, train_inds, oob_inds, importance, oob_metrics = train_estimator(support_set, n_samples, x_train, y_train, model_func, model_type, max_features, dt_path, max_val)
+    importance_cols = ['importance_%s' % c for c in predict_cols]
+    support_set[importance_cols] = importance
+    support_set['dt_model'] = dt_model
+    support_set['dt_file'] = dt_path
+    support_set['n_samples'] = n_samples
+    for metric in oob_metrics:
+        support_set[metric] = oob_metrics[metric]
+    
+    # Save oob and train inds
+    n_train = len(train_inds)
+    n_oob = len(oob_inds)
+    train_records = zip(np.full(n_train, set_id, dtype=int),
+                        train_inds,
+                        np.ones(n_train, dtype=int))
+    oob_records   = zip(np.full(n_oob, set_id, dtype=int),
+                        oob_inds,
+                        np.zeros(n_oob, dtype=int))
+    
+    # Can't write to DB because other threads may have a lock. Consider switching
+    #   to postgres or MySQL for concurrent connections
+    '''insert_cmd = 'INSERT INTO set_samples (set_id, sample_id, in_bag) VALUES (?,?,?);'
+    with sqlite3.connect(db_path) as connection:
+        connection.executemany(insert_cmd, train_records + oob_records)
+        connection.commit()'''
+    set_samples = pd.DataFrame(train_records + oob_records, columns=['set_id', 'sample_id', 'in_bag'])
+    
+    return support_set, set_samples
 
 '''def query_sample_ids(db_path, columns='*', set_id=None, oob=None, tbl_name='set_sample'):
     
@@ -779,8 +853,49 @@ def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier'):
     with sqlite.connect(db_path) as conncection:'''
         
 
+def parse_oob_expr(expr, oob_metrics):
     
-def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob=0):
+    oper = [s for s in list(*re.findall('(<(?!=))|(>(?!=))|(<=)|(>=)', expr)) if s]
+    if len(oper) != 1:
+        msg = '0 or multiple operators found in %s:\n\t%s' % (expr, '\n\t'.join(oper))
+        warnings.warn(msg, RuntimeWarning)
+        return
+    else:
+        oper = oper[0]
+    
+    operands = [s.strip() for s in expr.split(oper)]
+    if len(operands) != 2:
+        # Either more than one operator or missing metric/val on either side
+        msg = ('Could not parse expression %s by operator %s. oob_drop '+\
+        'expression must follow syntax <metric> <binary operator> <value> '+\
+        '(e.g., oob_rmse <= 70)' % (expr, oper))
+        warnings.warn(msg, RuntimeWarning)
+        return
+    else:
+        metric, value = operands
+    
+    if metric not in oob_metrics:
+        msg = 'OOB metric not understood: %s' % metric
+        warnings.warn(msg, RuntimeWarning)
+        return
+    
+    try:
+        value = int(value)
+    except ValueError:
+        msg = 'Invalid value in oob_drop expression: %s' % value
+        warnings.warn(msg, RuntimeWarning)
+        return
+    
+    dic = {'<': operator.lt,
+           '>': operator.gt,
+           '<=': operator.le,
+           '>=': operator.gt}
+    oper = dic[oper]
+    
+    return metric, oper, value
+
+
+def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, drop_value=0, model_type='classifier', drop_expression=None, metric='oob_rate'):
     """
     Calculate the out-of-bag accuracy for each support set in `df_sets`
     
@@ -790,14 +905,16 @@ def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob=
         DataFrame with support set info
     df_train : pandas DataFrame
         DataFrame of training sample
-    db_path : dict
+    db_path : str
         Full path to SQLite DB with 
     target_col : str
         string of the target column name
     predict_cols : list or array-like
         list-like of string prediction column names
-    min_oob : int
-        minimum OOB score. All sets with OOB score < `min_oob` will be dropped. Default = 0.
+    drop_value : int, optional
+        minimum OOB score. All sets with OOB score < `drop_value` will be dropped unless drop_expression is not None. Default = 0.
+    drop_expression : str, optional
+        string in the form <metric> <operator> <value> (e.g., oob_rate <= 10). All support sets for which the expression is true will be dropped. Default = None.
     
     Returns
     -------
@@ -807,6 +924,7 @@ def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob=
         View of df_sets where OOB rate < `min_oob`
 
     """
+
     if 'oob_rate' not in df_sets.columns:
         query = 'SELECT sample_id FROM _sample_ind WHERE set_id=? AND in_bag=?'
         connection = sqlite3.connect(db_path)
@@ -816,11 +934,20 @@ def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob=
             this_oob = df_train.ix[oob_inds]
             oob_response = this_oob[target_col]
             oob_predictors = this_oob[predict_cols]
-            oob_rate = calc_oob_rate(dt, oob_response, oob_predictors)
-            df_sets.ix[set_id, 'oob_rate'] = oob_rate
-    low_oob = df_sets[df_sets.oob_rate < min_oob]
+            oob_metrics = calc_oob_metrics(dt, oob_response, oob_predictors, model_type)
+            for metric in oob_metrics:
+                support_set[metric] = oob_metrics[metric]
+    else:
+        oob_metrics = [c for c in df_sets.columns if c.startswith('oob_')]
+    if drop_expression:
+        expression = parse_oob_expr(drop_expression, [m for m in oob_metrics])
+        if expression: # expression was valid
+            metric, oper, drop_value = expression
+        else:
+            oper = operator.lt # default is <
+    low_oob = df_sets[oper(df_sets[metric], drop_value)]
     
-    return df_sets, low_oob
+    return df_sets, low_oob, metric
 
 
 def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, db_path, df_sets, df_train, target_col, predict_cols, out_dir, file_stamp, prj, driver, oob_metric='oob_rate'):
@@ -842,7 +969,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, db_pat
     if 'oob_rate' not in df_sets.columns:
         get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols)
     empty_tiles = []
-    for i, (tile_id, tile_coords) in enumerate(df_tiles.ix[262:].iterrows()):
+    for i, (tile_id, tile_coords) in enumerate(df_tiles.iterrows()):
         t1 = time.time()
         print 'Aggregating for %s of %s tiles' % (i + 1, total_tiles)
         print 'Tile index: ', tile_id
@@ -853,7 +980,7 @@ def oob_map(ysize, xsize, nodata, nodata_mask, n_tiles, tx, support_size, db_pat
         # Get a mask for this tile
         if type(nodata_mask) == np.ndarray:
             tile_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
-        else: # Otherwise, it's a path to a shapefile
+        else: # Otherwise, it's an OGR layer
             tile_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, tile_coords[['ul_x', 'ul_y', 'lr_x', 'lr_y']], tx, -9999)
             tile_mask = tile_mask != -9999
         # If it's empty, skip and add it to the list
@@ -956,8 +1083,8 @@ def get_predict_array(args):
 
     ar = mosaic_by_tsa.get_mosaic(*args[1:])
     return args[0], ar.ravel()
-    
-    
+        
+
 def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, out_nodata, set_id, constant_vars=None):
     '''
     Return an array of flattened predictor arrays where each predictor is a 
@@ -996,6 +1123,238 @@ def get_predictors(df_var, mosaic_tx, tile_strs, tile_ar, coords, nodata_mask, o
           
     return ar
     
+
+def get_pixel_predictors(df_var, offset, tile_str, size=(1,1), out_nodata=-9999):
+    
+    predictors = []
+    for var_name, info in df_var.iterrows():
+        file_path = find_file(info.basepath, info.search_str, tile_str, info.path_filter)
+        ds = gdal.Open(file_path)
+        ar = ds.GetRasterBand(info.data_band).ReadAsArray(offset[1], offset[0], size[1], size[0])
+        predictors.append(ar.ravel().astype(np.int16))
+
+    #return np.array(predictors).reshape(1, len(df_var))
+    return np.vstack(predictors).T
+
+def par_predict_pixel(args):
+    t0 = time.time()
+    pct_complete = args[0]/float(args[1]) * 100
+    sys.stdout.write('\rPredicted %d of %d (%.2f%%) pixels. Cum. time: %.1f minutes' % (args[0], args[1], pct_complete, (time.time() - args[2])/60))
+    sys.stdout.flush()
+    p = predict_pixels(*args[3:])
+    #print 'Time %.1f seconds' % (time.time() - t0)
+    return p
+
+
+def unique_pixels(ar):
+    """ Adapted from pandas df.drop_duplicates()"""
+    from pandas.core.sorting import get_group_index
+    from pandas._libs.hashtable import duplicated_int64, _SIZE_HINT_LIMIT
+    import pandas.core.algorithms as algorithms
+    
+    ndims = ar.ndim
+    if ndims == 3:
+        nrows, ncols, nbands = ar.shape
+        ncells = nrows * ncols
+        flattened = ar.reshape(ncells, nbands)
+    elif ndims == 2: # It's been masked so each row represents a pixel
+        ncells, nbands = ar.shape
+        flattened = np.copy(ar)
+    else:
+        raise ValueError('array must have 2 or 3 dims. Passed array has %s' % ndims)
+    def f(vals):
+        labels, shape = algorithms.factorize(
+            vals, size_hint=min(ncells, _SIZE_HINT_LIMIT))
+        return labels.astype('i8', copy=False), len(shape)
+
+    vals = (flattened[:, i] for i in xrange(nbands))
+    labels, shape = zip(*map(f, vals))
+
+    ids = get_group_index(labels, shape, sort=False, xnull=False)
+    
+    # match id with each pixel
+    df = pd.DataFrame(flattened, index=ids)
+    
+    # just get unique pixels
+    df = df[~duplicated_int64(ids, keep='first')] 
+    
+    # Get indices to be able to reconstruct flattened
+    unique_ids, indices = np.unique(ids, return_inverse=True)
+    
+    # Match indices val with id val
+    df['id'] = pd.Series(np.arange(len(df)), index=unique_ids)
+    
+    df.set_index('id', inplace=True)
+    df.sort_index(inplace=True)
+    unique_cells = df.values
+    unique_ids = df.index.values
+    
+    return unique_cells, unique_ids, indices
+
+
+def predict_pixels(estimators, predictors, agg_stats, pixel_index):
+    
+    predictions = np.array([e.predict(predictors) for e in estimators]).T
+
+    #del estimators, sets, predictors
+    last_dim = predictions.ndim - 1
+    complex_stats = 'importance', 'pct_vote'
+    simple_stats = agg_stats[~agg_stats.index.isin(complex_stats)]
+    stats = {name: func(predictions, axis=last_dim) for name, func in simple_stats.iteritems()}
+    
+    stat_names = agg_stats.index
+    if 'pct_vote' in stat_names:
+        if 'vote' not in stat_names:
+            stats['vote'] = mode(predictions, axis=last_dim)
+        if 'count' not in stat_names:
+            stats['count'] = np.full(*predictions.shape, dtype=np.int16)
+        stats['pct_vote'] = pct_vote(predictions, stats['vote'], stats['count'])
+
+    #import pdb; pdb.set_trace()
+    return pd.DataFrame(stats, index=pixel_index)
+
+
+def get_agg_dict():
+    ''' Helper ficntion to isolate dict from exec 'free variable' error'''
+    def count(p, axis=None):
+        return p.shape[1]#np.full(*p.shape, dtype=np.int16)
+        
+    agg_dict = pd.Series({'mean': np.mean,
+                          'vote': mode,
+                          'median': np.median,
+                          'stdv': np.std,
+                          'pct_vote': pct_vote,
+                          'importance': 1,
+                          'oob': 1,
+                          'count': count})
+    return agg_dict
+
+
+def get_ul_coord(min_coord, max_coord, res, snap_coord=None):
+    
+    sign = res/abs(res)
+    if sign > 0:
+        ul = min([min_coord, max_coord])
+    else:
+        ul = max([min_coord, max_coord])
+    if snap_coord:
+        ul += snap_coord % res - ul % res
+    
+    return ul 
+
+
+def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_size, agg_stats, path_template, prj, nodata, snap_coord=None, tile_id_field='name'):
+    
+    ''' make mosaic_path optional and to use on-the-fly tiles'''
+    
+    t1 = time.time()
+    
+    #get un-picklable objects
+    mosaic_dataset = ogr.Open(mosaic_path)
+    mosaic_ds = mosaic_dataset.GetLayer()
+    agg_dict = get_agg_dict()
+    agg_stats = agg_dict[agg_stats]
+    driver = gdal.GetDriverByName('gtiff')
+        
+    tile_str = tile_info[tile_id_field]
+    x_res = mosaic_tx[1]
+    y_res = mosaic_tx[5]
+    
+    # Make mask
+    fid = tile_info.name # .name gets idx of thre row from oringal df
+    mask, _ = mosaic_by_tsa.kernel_from_shp(mosaic_ds, fid, mosaic_tx, -9999, return_mask=True)
+    tile_size = mask.shape
+    tile_tx, tile_extent = tx_from_shp(mosaic_ds, x_res, y_res, snap_coord, fid=fid)
+    xmin, xmax, ymin, ymax = tile_extent
+    ul_x = get_ul_coord(xmin, xmax, x_res, snap_coord[0])
+    ul_y = get_ul_coord(ymin, ymax, y_res, snap_coord[1])
+    tile_ul = ul_x, ul_y
+    mask_offset = calc_offset(tile_info[['ul_x','ul_y']], tile_ul, tile_tx)
+    
+    feature = mosaic_ds.GetFeature(fid)
+    tile_geom = feature.GetGeometryRef()
+    t1 = time.time()
+    overlapping_sets = get_overlapping_sets(df_sets, tile_geom)
+    del tile_geom, feature
+    
+    set_stack = []
+    t2 = time.time()
+    for set_id, set_info in overlapping_sets.iterrows():
+        # load estimators
+        try:
+            with open(overlapping_sets.ix[set_id, 'dt_file'], 'rb') as f: 
+                overlapping_sets.ix[set_id, 'dt_model'] = pickle.load(f)
+        except:
+            overlapping_sets.ix[set_id, 'dt_model'] = joblib.load(overlapping_sets.ix[set_id, 'dt_file'])
+        #set_tx = set_info.ul_x, x_res, 0, set_info.ul_y, 0, y_res # Change to get actual offset
+        offset = calc_offset(tile_ul, set_info[['ul_x', 'ul_y']], tile_tx)
+        t_inds, s_inds = mosaic_by_tsa.get_offset_array_indices(tile_size, support_size, offset)
+        tile_ar = np.full(tile_size, -1, dtype=np.int32)
+        tile_ar[t_inds[0]:t_inds[1], t_inds[2]:t_inds[3]] = set_id
+        set_stack.append(tile_ar)
+    set_stack = np.dstack(set_stack)[mask]
+    
+    predictors = get_pixel_predictors(df_var, mask_offset, tile_str, tile_size)
+    n_pixels, n_predictors = predictors.shape      
+    
+    # find unique combos of support sets
+    t2 = time.time()
+    unique_cells, _, cell_inds = unique_pixels(set_stack)
+    n_unique = len(unique_cells)
+    del set_stack
+    
+    oob_stats = [s for s in agg_stats.index if 'oob' in s]
+    agg_stats.drop(oob_stats, inplace=True)
+    importance_cols = sorted([c for c in df_sets.columns if 'importance' in c])
+    
+    # For each unique set of estimators, make predictions
+    pixel_ids = np.arange(mask.size)[mask.ravel()]
+    dfs = []
+    for i, cell in enumerate(unique_cells):
+        set_inds = cell[cell != -1]
+        estimators = overlapping_sets.ix[set_inds, 'dt_model']
+        pxl_mask = cell_inds == i
+        these_pxl_ids = pixel_ids[pxl_mask]
+        stats = predict_pixels(estimators, predictors[these_pxl_ids, :],
+                               agg_stats, these_pxl_ids)
+        n_pixels = these_pxl_ids.size
+        for s in oob_stats:
+            if s in df_sets.columns:
+                stats[s] = int(round(overlapping_sets[s].mean()))
+        if 'importance' in agg_stats.index:
+            if importance_cols:
+                most_important = np.argmax(overlapping_sets.ix[set_inds, importance_cols].values, axis=1)
+            else:
+                most_important, _ = zip(*[get_max_importance(e) for e in estimators])
+            stats['importance'] = int(mode(most_important))
+        dfs.append(stats)
+    predictions = pd.concat(dfs).sort_index().round().astype(int)
+    
+    this_template = path_template.format(tile_id=tile_str)
+    
+    for stat, values in predictions.iteritems():
+        try:
+            if stat == 'stdv':
+                this_nodata = -9999
+            else:
+                this_nodata = nodata
+            ar = np.full(mask.shape, this_nodata)
+            ar[mask] = values
+            this_path = this_template % {'stat': stat}
+            mosaic_by_tsa.array_to_raster(ar, tile_tx, prj, driver, this_path, nodata=this_nodata, silent=True)
+        except Exception as e:
+            import pdb; pdb.set_trace()
+    del predictions, predictors, dfs
+
+
+def par_predict_tile(args):
+    
+    t0 = time.time()
+    predict_tile(*args[3:])
+    this_tile, n_tiles, start_time = args[:3]
+    format_tuple = this_tile, n_tiles, float(this_tile)/n_tiles, (time.time() - start_time)/60
+    sys.stdout.write('\r%s of %s tiles (%.1f%%) || run time: %.1f mins.' % format_tuple)
+    sys.stdout.flush()
 
 
 def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, constant_vars=None):
@@ -1171,31 +1530,6 @@ def get_overlapping_sets(support_sets, geometry):
             overlapping.append(set_id)
 
     return support_sets.ix[overlapping]
-        
-        
-
-
-"""def get_overlapping_sets(df_sets, tile_bounds, tile_size, support_size, resolution=30):
-    '''
-    Return a dataframe of support sets that overlap the tile defined by
-    tile bounds
-    '''
-    set_ysize, set_xsize = support_size
-    tile_rows, tile_cols = tile_size
-    
-    # Calculate the max distance that the centers of the tile and the set
-    #   could be from one another
-    max_x_dist = (set_xsize/2 + tile_cols/2)/resolution
-    max_y_dist = (set_ysize/2 + tile_rows/2)/resolution
-    
-    # Get sets where both the x and y center coords are within the respective
-    #   max distances of one another
-    x_dif = (df_sets.ctr_x - tile_bounds.ctr_x).abs().astype(int)/resolution
-    y_dif = (df_sets.ctr_y - tile_bounds.ctr_y).abs().astype(int)/resolution 
-    overlap = df_sets[(x_dif < max_x_dist) & (y_dif < max_y_dist)]
-    #import pdb; pdb.set_trace()
-    
-    return overlap"""
 
 
 def calc_offset(ul_xy1, ul_xy2, tx):
@@ -1210,28 +1544,39 @@ def calc_offset(ul_xy1, ul_xy2, tx):
     #return pd.Series((row_off, col_off))
     return row_off, col_off
 
-def shp_to_df(shp):
-    ''' Return a pandas dataframe of a shapefile attribute table'''    
 
+def attributes_to_df(shp):
+    ''' 
+    Copy the attributes of a shapefile to a pandas DataFrame
+    
+    Parameters:
+    shp -- path to a shapefile
+    
+    Returns:
+    df -- a pandas DataFrame. FID is the index.
+    '''
     ds = ogr.Open(shp)
     lyr = ds.GetLayer()
     lyr_def = lyr.GetLayerDefn()
     
     fields = [lyr_def.GetFieldDefn(i).GetName() for i in range(lyr_def.GetFieldCount())]
-    attributes = []
-    for i in xrange(lyr.GetFeatureCount()):
-        feat = lyr.GetFeature(i)
-        these_vals = {field: feat.GetField(field) for field in fields}
-        these_vals['fid'] = feat.GetFID()
-        attributes.append(these_vals)
     
-    lyr.Destroy()
-    ds.Destroy()
+    if lyr.GetFeatureCount() == 0:
+        raise RuntimeError('Vector dataset has 0 features: ', shp)
     
-    df = pd.DataFrame(attributes)
+    vals = []
+    for feature in lyr:
+        #feature = lyr.GetFeature(i)
+        these_vals = {f: feature.GetField(f) for f in fields}
+        these_vals['fid'] = feature.GetFID()
+        vals.append(these_vals)
+        feature.Destroy()
+        
+    df = pd.DataFrame(vals)
     df.set_index('fid', inplace=True)
     
     return df
+
     
 def load_predictions(p_dir, df_sets, tile_ul, tile_size):
 
@@ -1264,7 +1609,7 @@ def fill_tile_band(tile_size, ar_pred, tile_inds, nodata):
     # Fill just the part of the array that overlaps
     try:
         ar_tile = np.full(tile_size, np.nan)
-        ar_pred = ar_pred.astype(np.float16)
+        ar_pred = ar_pred.astype(np.float32)
         ar_pred[ar_pred == nodata] = np.nan
 
         ar_tile[tile_inds[0]:tile_inds[1], tile_inds[2]:tile_inds[3]] = ar_pred
@@ -1398,8 +1743,8 @@ def weighted_mean(ar, b, c=5, a=1):
 def pct_vote(ar, ar_vote, ar_count):
     
     shape = ar.shape
-    ar_eq = ar == ar_vote.repeat(shape[2]).reshape(shape)
-    ar_sum = ar_eq.sum(axis=2)
+    ar_eq = ar == ar_vote.repeat(shape[-1]).reshape(shape)
+    ar_sum = ar_eq.sum(axis=ar.ndim - 1)
     ar_pct = np.round(ar_sum/ar_count.astype(np.float16) * 100).astype(np.uint8)
     
     return ar_pct
@@ -1618,8 +1963,8 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
             tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_coords.name, stat))
             ds = gdal.Open(tile_file)
             ar_tile = ds.ReadAsArray()
-            t_ulx = tile_coords[['ul_x', 'ul_y']]
-            row_off, col_off = calc_offset((ul_x, ul_y), t_ulx, tx)
+            t_ul = tile_coords[['ul_x', 'ul_y']]
+            row_off, col_off = calc_offset((ul_x, ul_y), t_ul, tx)
             ar[row_off : row_off + tile_rows, col_off : col_off + tile_cols] = ar_tile
         
         out_path = os.path.join(out_dir, '%s_%s.tif' % (file_stamp, stat))
