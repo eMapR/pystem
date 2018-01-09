@@ -8,6 +8,7 @@ Predict from a spatiotemporal exploratory model
 import os
 import sys
 import glob
+import re
 import time
 import fnmatch
 import subprocess
@@ -101,17 +102,13 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     if not os.path.exists(mosaic_path):
         sys.exit('mosaic_path does not exist:\n%s' % mosaic_path)
     
-    predict_dir = os.path.join(out_dir, 'decisiontree_predictions')
-    if not os.path.exists(predict_dir):
-        os.mkdir(predict_dir)
-    
     if not 'file_stamp' in inputs: file_stamp = os.path.basename(model_dir)
-    db_path = os.path.join(model_dir, file_stamp + '.db')
-    try:
+    db_path = os.path.join(model_dir, os.path.basename(model_dir) + '.db')
+    if os.path.exists(db_path):
         engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
         with engine.connect() as con, con.begin():
             df_sets = pd.read_sql_table('support_sets', con, index_col='set_id')#'''
-    except:
+    else:
         set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
         if not os.path.isfile(set_txt):
             raise IOError('No database or support set txt file found')
@@ -174,7 +171,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     last_dts = pd.Series()
     agg_stats = [s.strip().lower() for s in agg_stats.split(',')]
     n_jobs = int(n_jobs)
-    tile_dir = os.path.join(model_dir, 'temp_tiles')
+    tile_dir = os.path.join(out_dir, '_temp_tiles')
     #tile_dir = '/home/server/pi/homes/shooper/delete_test'
     if not os.path.isdir(tile_dir):
         os.mkdir(tile_dir)
@@ -185,13 +182,13 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         files = os.listdir(tile_dir)
         tile_files = pd.DataFrame(columns=agg_stats, index=tiles[tile_id_field])
         for stat in agg_stats:
-            stat_match = [f.split('_')[1] for f in fnmatch.filter(files, 'tile*%s.tif' % stat)]
+            pattern = re.compile('tile_\d+_%s.tif' % stat)
+            stat_match = [f.split('_')[1] for f in files if pattern.match(f)]
             tile_files[stat] = pd.Series(np.ones(len(stat_match)), index=stat_match)
         index_field = tiles.index.name
         tiles[index_field] = tiles.index
         tiles = tiles.set_index(tile_id_field, drop=False)[tile_files.isnull().any(axis=1)]
-        tiles.set_index(index_field, inplace=True)
-    
+        tiles.set_index(index_field, inplace=True)#'''
     tiles['ul_x'] = [stem.get_ul_coord(xmin, xmax, x_res) 
                     for i, (xmin, xmax) in tiles[['xmin','xmax']].iterrows()]
     tiles['ul_y'] = [stem.get_ul_coord(ymin, ymax, y_res) 
@@ -204,25 +201,29 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     support_nrows = int(support_size[0]/abs(y_res))
     support_ncols = int(support_size[1]/abs(x_res))
     t1 = time.time()
-    #args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles[tiles['name'].isin(['1771', '3224', '0333', '0558'])].iterrows())]    
-    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.iterrows())]
+    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles[tiles['name'].isin(['1092', '3224'])].iterrows())]    
+    #args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.iterrows())]
+    
     
     if n_jobs > 1:
         print 'Predicting with %s jobs...\n' % n_jobs
         pool = Pool(n_jobs)
-        pool.map(stem.par_predict_tile, args, 1)
+        limits = pool.map(stem.par_predict_tile, args, 1)
         pool.close()
         pool.join()
     else:
+        print 'Predicting with 1 job ...\n'
+        limits = []
         for arg in args:
-            print 'Predicting with 1 job ...\n'
-            stem.par_predict_tile(arg)#'''
+            limits.append(stem.par_predict_tile(arg))#'''
     print '\n\nFinished predicting in %.1f hours. \n\nStitching tiles...' % ((time.time() - t1)/3600)
-    
+
+    limits = pd.concat(limits)
     t1 = time.time()
     mosaic_ul = mosaic_tx[0], mosaic_tx[3]
     driver = gdal.GetDriverByName('gtiff')
     for stat in agg_stats:
+        dtype = mosaic.get_min_numpy_dtype(limits[stat])
         if stat == 'stdv':
             this_nodata = -9999
             ar = np.full((ysize, xsize), this_nodata, dtype=np.int16) 
@@ -245,7 +246,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             except Exception as e:
                 import pdb; pdb.set_trace()
         
-        out_path = os.path.join(model_dir, '%s_%s.tif' % (file_stamp, stat))
+        out_path = os.path.join(out_dir, '%s_%s.tif' % (file_stamp, stat))
         #out_path = os.path.join('/home/server/pi/homes/shooper/delete_test', '%s_%s.tif' % (file_stamp, stat))
         gdal_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(ar.dtype)
         mosaic.array_to_raster(ar, mosaic_tx, prj, driver, out_path, gdal_dtype, nodata=this_nodata)

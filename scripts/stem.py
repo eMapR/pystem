@@ -22,6 +22,7 @@ from string import ascii_lowercase
 from osgeo import gdal, ogr, gdal_array
 from sklearn import tree, metrics
 from sklearn.externals import joblib
+from sklearn.externals.joblib import Parallel, delayed
 from multiprocessing import Pool
 import matplotlib
 import matplotlib.pyplot as plt
@@ -130,11 +131,12 @@ def vars_to_numbers(cell_size, support_size, sets_per_cell, min_obs, max_feature
     return cell_size, support_size, sets_per_cell, min_obs, max_features, pct_train
 
 
-def get_raster_bounds(raster):
+def get_raster_bounds(ds):
     '''
-    Return the xy bounds of raster
+    Return the xy bounds of ds
     '''
-    ds = gdal.Open(raster)
+    if isinstance(ds, str):
+        ds = gdal.Open(ds)
     tx = ds.GetGeoTransform()
     ul_x, x_res, x_rot, ul_y, y_rot, y_res = tx
     x_size = ds.RasterXSize
@@ -188,7 +190,7 @@ def generate_gsrd_grid(cell_size, min_x, min_y, max_x, max_y, x_res, y_res):
     return cells
 
 
-def sample_gsrd_cell(n, cell_bounds, x_size, y_size, x_res, y_res, tx, snap_coord=None):
+def sample_gsrd_cell(n, cell_bounds, x_size, y_size, x_res, y_res, tx, snap_coord=None, center_coords=None):
     '''
     Return a list of bounding coordinates for n support sets from 
     randomly sampled x,y center coords within bounds
@@ -206,8 +208,12 @@ def sample_gsrd_cell(n, cell_bounds, x_size, y_size, x_res, y_res, tx, snap_coor
     else:
         x_remain = (tx[0] % x_res)
         y_remain = (tx[3] % y_res)
-    x_centers = [int(x/x_res) * x_res - x_remain for x in random.sample(xrange(min_x, max_x + 1), n)]
-    y_centers = [int(y/y_res) * y_res - y_remain for y in random.sample(xrange(min_y, max_y + 1), n)]
+    
+    if not center_coords:
+        x_centers = [int(x/x_res) * x_res - x_remain for x in random.sample(xrange(min_x, max_x + 1), n)]
+        y_centers = [int(y/y_res) * y_res - y_remain for y in random.sample(xrange(min_y, max_y + 1), n)]
+    else:
+        x_centers, y_centers = zip(*center_coords)
     
     # Calculate bounding coords from support set centers and make sure 
     #   they're still snapped
@@ -939,13 +945,16 @@ def get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, drop_val
                 support_set[metric] = oob_metrics[metric]
     else:
         oob_metrics = [c for c in df_sets.columns if c.startswith('oob_')]
+    
     if drop_expression:
         expression = parse_oob_expr(drop_expression, [m for m in oob_metrics])
         if expression: # expression was valid
             metric, oper, drop_value = expression
         else:
             oper = operator.lt # default is <
-    low_oob = df_sets[oper(df_sets[metric], drop_value)]
+        low_oob = df_sets[oper(df_sets[metric], drop_value)]
+    else:
+        low_oob = pd.DataFrame(columns=df_sets.columns)
     
     return df_sets, low_oob, metric
 
@@ -1134,7 +1143,18 @@ def get_pixel_predictors(df_var, offset, tile_str, size=(1,1), out_nodata=-9999)
         predictors.append(ar.ravel().astype(np.int16))
 
     #return np.array(predictors).reshape(1, len(df_var))
-    return np.vstack(predictors).T
+    return np.vstack(predictors).T#'''
+'''def get_pixel_predictors(df_var, offset, tile_str, size=(1,1), out_nodata=-9999):
+    
+    predictors = []
+    for var_name, info in df_var.iterrows():
+        file_path = find_file(info.basepath, info.search_str, tile_str, info.path_filter)
+        ds = gdal.Open(file_path)
+        ar = ds.GetRasterBand(info.data_band).ReadAsArray(offset[1], offset[0], size[1], size[0])
+        predictors.append(ar.astype(np.int16))
+
+    #return np.array(predictors).reshape(1, len(df_var))
+    return np.dstack(predictors)'''
 
 def par_predict_pixel(args):
     t0 = time.time()
@@ -1192,6 +1212,14 @@ def unique_pixels(ar):
     return unique_cells, unique_ids, indices
 
 
+def as_min_dtype(ar, to_int=True):
+    
+    if to_int: ar = np.round(ar).astype(int)
+    min_dtype = mosaic_by_tsa.get_min_numpy_dtype(ar)
+    
+    return ar.astype(min_dtype)
+
+
 def predict_pixels(estimators, predictors, agg_stats, pixel_index):
     
     predictions = np.array([e.predict(predictors) for e in estimators]).T
@@ -1200,7 +1228,8 @@ def predict_pixels(estimators, predictors, agg_stats, pixel_index):
     last_dim = predictions.ndim - 1
     complex_stats = 'importance', 'pct_vote'
     simple_stats = agg_stats[~agg_stats.index.isin(complex_stats)]
-    stats = {name: func(predictions, axis=last_dim) for name, func in simple_stats.iteritems()}
+    stats = {name: as_min_dtype(func(predictions, axis=last_dim))
+            for name, func in simple_stats.iteritems()}
     
     stat_names = agg_stats.index
     if 'pct_vote' in stat_names:
@@ -1209,8 +1238,10 @@ def predict_pixels(estimators, predictors, agg_stats, pixel_index):
         if 'count' not in stat_names:
             stats['count'] = np.full(*predictions.shape, dtype=np.int16)
         stats['pct_vote'] = pct_vote(predictions, stats['vote'], stats['count'])
-
-    #import pdb; pdb.set_trace()
+    
+    #stats  = pd.DataFrame(stats)[simple_stats.index]
+    #if np.any(stats.dtypes == np.int16) or np.any(stats.dtypes == np.uint16):
+        #import pdb; pdb.set_trace()
     return pd.DataFrame(stats, index=pixel_index)
 
 
@@ -1277,22 +1308,27 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
     overlapping_sets = get_overlapping_sets(df_sets, tile_geom)
     del tile_geom, feature
     
-    set_stack = []
+    nrows, ncols = tile_size
+    if overlapping_sets.index.max() < 65355: # max val for unsigned 16-bit int
+        stack_nodata = 65355
+        np_dtype = np.uint16
+    else:
+        stack_nodata = -1
+        np_dtype = np.int32
+    stack_shape = (nrows, ncols, len(overlapping_sets))
+    set_stack = np.full(stack_shape, stack_nodata, dtype=np_dtype)
     t2 = time.time()
-    for set_id, set_info in overlapping_sets.iterrows():
+    for i, (set_id, set_info) in enumerate(overlapping_sets.iterrows()):
         # load estimators
         try:
             with open(overlapping_sets.ix[set_id, 'dt_file'], 'rb') as f: 
                 overlapping_sets.ix[set_id, 'dt_model'] = pickle.load(f)
         except:
             overlapping_sets.ix[set_id, 'dt_model'] = joblib.load(overlapping_sets.ix[set_id, 'dt_file'])
-        #set_tx = set_info.ul_x, x_res, 0, set_info.ul_y, 0, y_res # Change to get actual offset
         offset = calc_offset(tile_ul, set_info[['ul_x', 'ul_y']], tile_tx)
         t_inds, s_inds = mosaic_by_tsa.get_offset_array_indices(tile_size, support_size, offset)
-        tile_ar = np.full(tile_size, -1, dtype=np.int32)
-        tile_ar[t_inds[0]:t_inds[1], t_inds[2]:t_inds[3]] = set_id
-        set_stack.append(tile_ar)
-    set_stack = np.dstack(set_stack)[mask]
+        set_stack[t_inds[0]:t_inds[1], t_inds[2]:t_inds[3], i] = set_id
+    set_stack = set_stack[mask]
     
     predictors = get_pixel_predictors(df_var, mask_offset, tile_str, tile_size)
     n_pixels, n_predictors = predictors.shape      
@@ -1311,51 +1347,60 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
     pixel_ids = np.arange(mask.size)[mask.ravel()]
     dfs = []
     for i, cell in enumerate(unique_cells):
-        set_inds = cell[cell != -1]
+        set_inds = cell[cell != stack_nodata]
         estimators = overlapping_sets.ix[set_inds, 'dt_model']
         pxl_mask = cell_inds == i
         these_pxl_ids = pixel_ids[pxl_mask]
         stats = predict_pixels(estimators, predictors[these_pxl_ids, :],
                                agg_stats, these_pxl_ids)
-        n_pixels = these_pxl_ids.size
         for s in oob_stats:
             if s in df_sets.columns:
-                stats[s] = int(round(overlapping_sets[s].mean()))
+                stats[s] = np.uint8(round(overlapping_sets[s].mean()))
         if 'importance' in agg_stats.index:
             if importance_cols:
                 most_important = np.argmax(overlapping_sets.ix[set_inds, importance_cols].values, axis=1)
             else:
                 most_important, _ = zip(*[get_max_importance(e) for e in estimators])
-            stats['importance'] = int(mode(most_important))
+            stats['importance'] = np.uint8(mode(most_important))
         dfs.append(stats)
-    predictions = pd.concat(dfs).sort_index().round().astype(int)
+        
+    predictions = pd.concat(dfs).sort_index()#.round()
+    del dfs, predictors
     
+    n_predictions = len(predictions)
     this_template = path_template.format(tile_id=tile_str)
-    
     for stat, values in predictions.iteritems():
-        try:
-            if stat == 'stdv':
-                this_nodata = -9999
-            else:
-                this_nodata = nodata
-            ar = np.full(mask.shape, this_nodata)
-            ar[mask] = values
-            this_path = this_template % {'stat': stat}
-            mosaic_by_tsa.array_to_raster(ar, tile_tx, prj, driver, this_path, nodata=this_nodata, silent=True)
-        except Exception as e:
-            import pdb; pdb.set_trace()
-    del predictions, predictors, dfs
-
+        #try:
+        if stat == 'stdv':
+            this_nodata = -9999
+        else:
+            this_nodata = nodata
+        ar = np.full(mask.shape, this_nodata)
+        ar[mask] = values[:n_predictions] # Indexed 'cuz adding nodata to predictions
+        this_path = this_template % {'stat': stat}
+        mosaic_by_tsa.array_to_raster(ar, tile_tx, prj, driver, this_path, nodata=this_nodata, silent=True)
+        predictions.loc[mask.size, stat] = this_nodata # add nodata val to get max/min later
+            #import pdb; pdb.set_trace()
+        #except Exception as e:
+        #   import pdb; pdb.set_trace()
+    
+    mins = predictions.min(axis=0)
+    maxs = predictions.max(axis=0)
+    
+    return pd.DataFrame([mins, maxs])
+    
 
 def par_predict_tile(args):
     
     t0 = time.time()
-    predict_tile(*args[3:])
+    limits = predict_tile(*args[3:])
     this_tile, n_tiles, start_time = args[:3]
-    format_tuple = this_tile, n_tiles, float(this_tile)/n_tiles, (time.time() - start_time)/60
+    format_tuple = this_tile, n_tiles, float(this_tile)/n_tiles * 100, (time.time() - start_time)/60
     sys.stdout.write('\r%s of %s tiles (%.1f%%) || run time: %.1f mins.' % format_tuple)
     sys.stdout.flush()
-
+    
+    return limits
+    
 
 def predict_set(set_id, df_var, mosaic_ds, coords, mosaic_tx, xsize, ysize, dt, nodata, dtype=np.int16, constant_vars=None):
     '''
