@@ -13,12 +13,14 @@ import warnings
 import pandas as pd
 import numpy as np
 
+package_dir = os.path.join(os.path.dirname(__file__), '..')
+sys.path.append(package_dir)
 from get_stratified_random_pixels import parse_bins
 from evaluation import confusion_matrix_by_area
 import mosaic_by_tsa as mosaic
 
 
-def read_params(txt):
+def read_params(txt, sep=';'):
     '''
     Return a dictionary and a dataframe from parsed parameters in txt
     '''
@@ -30,7 +32,7 @@ def read_params(txt):
     d = {}
     try:
         with open(txt) as f:
-            input_vars = [line.split(";") for line in f]
+            input_vars = [line.split(sep) for line in f]
     except:
         print 'Problem reading parameter file:\n', txt
         return None
@@ -72,10 +74,10 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
     #out_txt = os.path.join(out_dir, 'confusion.txt')
     if out_txt:
         out_dir = os.path.dirname(out_txt)
-        if not os.path.isdir(out_dir):
-            os.mkdir(out_dir)    
+        if not os.path.exists(out_dir):
+            os.mkdir(out_dir) 
         shutil.copy2(params, out_dir)
-        
+
     # If p_path was specified, this call of the function is coming from outside
     #   predict_stem.py. Otherwise, ar_p should be given.
     if 'p_path' in locals():
@@ -106,14 +108,14 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
     
     samples = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
     
-    df = confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=mask, bins=bins, out_txt=out_txt, target_col=target_col, match=match)
+    df_adj, df_smp = confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=mask, bins=bins, out_txt=out_txt, target_col=target_col, match=match)
 
     ar_p = None
     ar_t = None
     mask = None
     
-    accuracy = df.ix['producer','user']
-    kappa = df.ix['producer', 'kappa']
+    accuracy = df_adj.ix['producer','user']
+    kappa = df_adj.ix['producer', 'kappa']
     if inventory_txt and file_stamp:
         df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
         if file_stamp in df_inv.index and 'vote' in os.path.basename(out_dir):
@@ -128,7 +130,7 @@ def main(params, ar_p=None, out_txt=None, inventory_txt=None, target_col=None, m
             df_inv.to_csv(inventory_txt, sep='\t')
             
     
-    return df
+    return df_smp
 
 
 if __name__ == '__main__':
