@@ -1,5 +1,7 @@
 
+
 import os
+import sys
 import gdal
 import ogr
 import time
@@ -16,6 +18,8 @@ from matplotlib.colors import LogNorm, PowerNorm
 from scipy import stats
 from sklearn import metrics
 
+package_dir = os.path.join(os.path.dirname(__file__), '..')
+sys.path.append(package_dir)
 import stem
 import mosaic_by_tsa as mosaic
 from extract_xy_by_mosaic import calc_row_stats
@@ -131,7 +135,7 @@ def feature_to_mask(feat, x_res, y_res):
     lyr_mem = ds_mem.CreateLayer('poly', None, ogr.wkbPolygon)
     lyr_mem.CreateFeature(feat.Clone())
     
-    # Calculate the pixel size
+    # Calculate the size in pixels
     geom = feat.GetGeometryRef()
     x1, x2, y1, y2 = geom.GetEnvelope()
     xsize = abs(int((x2 - x1)/x_res))
@@ -359,7 +363,7 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
     # If samples weren't provided (i.e., wall-to-wall eval), samples are every
     #   non-nodata pixel
     #if not samples:
-    if type(samples) != pd.core.frame.DataFrame:
+    if not isinstance(samples, pd.core.frame.DataFrame):
         ar_rows, ar_cols = np.indices(ar_p.shape)
         mask = (ar_p != p_nodata) & (ar_t != t_nodata)
         samples = pd.DataFrame({'row': ar_rows[mask], 'col': ar_cols[mask]})
@@ -370,7 +374,7 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
     col_dirs = [-1, 0, 1,-1, 0, 1,-1, 0, 1]
     kernel_rows = [row + d + 1 for row in samples.row for d in row_dirs] #+1 because buffering at edges
     kernel_cols = [col + d + 1 for col in samples.col for d in col_dirs]
-    ar_buf = np.full([dim + 2 for dim in ar_p.shape], p_nodata, dtype=np.int32)
+    ar_buf = np.full([dim + 2 for dim in ar_p.shape], p_nodata, dtype=ar_p.dtype)
     ar_buf[1:-1, 1:-1] = ar_p
     p_kernel = ar_buf[kernel_rows, kernel_cols].reshape(len(samples), len(row_dirs))
     ar_buf[1:-1, 1:-1] = ar_t
@@ -415,7 +419,7 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
     return t_samples, p_samples
 
 
-def area_weighted_rmse(ar_p, ar_t, p_sample, t_sample, bins, p_nodata):
+def area_weighted_rmse(ar_p, ar_t, p_sample, t_sample, bins, p_nodata, out_txt=None):
     
     scores = []
     size = float(ar_p[ar_p != p_nodata].size)
@@ -432,7 +436,11 @@ def area_weighted_rmse(ar_p, ar_t, p_sample, t_sample, bins, p_nodata):
     
     df = pd.DataFrame(scores).set_index('label')
     rmse_w = sum(df.area * df.rmse)
+    df.loc['overall', 'rmse'] = rmse_w
     
+    if out_txt:
+        df.to_csv(out_txt, sep='\t')
+        
     return rmse_w
 
 
@@ -523,34 +531,27 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     df.drop(empty_bins, axis=1, inplace=True)
     labels = df.columns.tolist()
     
-    #filter out any bins for which there aren't any samples in the prediction or reference
-    '''null_reference = df.columns[~df.any(axis=0)]
-    null_predicted = df.columns[~df.any(axis=1)]
-    drop_bins = [l for l in labels if l in null_reference and l in null_predicted]
-    if len(drop_bins) > 0:
-        dropped_bin_str = '\t\n'.join([b.replace('_', '-') for b in drop_bins])
-        print 'No samples found in reference or prediction data for:\n\t%s\n' % dropped_bin_str
-    
-    df.drop(drop_bins, axis=0, inplace=True)
-    df.drop(drop_bins, axis=1, inplace=True)
-    import pdb; pdb.set_trace()'''
     df['total_pxl'] = pd.Series(total_counts)
     
-    #df['n_samples'] = sample_counts#'''
-    ''' try .ix-ing using labels, labels every time '''
+
     # Calculate proportional accuracy
     df['pct_area'] = df.total_pxl/float(n_pixels)
     df['total'] = df.ix[labels, labels].sum(axis=1)
     df.ix['total'] = df.ix[labels, labels].sum(axis=0)
+    #df_smp = df.ix[labels, labels]
     df_adj = df.ix[labels, labels].div(df.total, axis=0).mul(df.pct_area, axis=0)
+
+    #import pdb; pdb.set_trace()
     
     # Calculate user's and producer's accuracy
     for l in labels:
         correct = df_adj.ix[l,l]
         df.ix[l, 'user'] = correct / df_adj.ix[l, labels].sum()
         df.ix['producer', l] = correct / df_adj.ix[labels, l].sum()
+
+    calc_ci(df, np.array(labels)) # calculates in place    
     
-    # Calculate confidence intervals for user's and producer's
+    '''# Calculate confidence intervals for user's and producer's
     df['u_ci'] = df.ix[labels].apply(
     lambda x: confidence_interval(x[labels], 
                                   x['total'], 
@@ -564,58 +565,53 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
                                   df.ix[labels, 'pct_area'], 
                                   x['producer']
                                   ),
-                                     axis=0).round(3) * 100
-    df['user'] = df['user'].round(3) * 100 # Round for readibility
-    df.ix['producer'] = df.ix['producer'].round(3) * 100
+                                     axis=0).round(3) * 100'''
+
     
     # Calc overall accuracy and confidence interval
     total_pxl = df_adj.values.sum()
     correct = np.diag(df_adj)
     accuracy = correct.sum()
-    df.ix['producer', 'acc_ci'] = confidence_interval(np.diag(df.ix[labels, labels]), 
+    '''df.ix['producer', 'acc_ci'] = confidence_interval(np.diag(df.ix[labels, labels]), 
                                                       df.ix[labels, 'total'],
                                                       df.ix[labels, 'pct_area'],
                                                       accuracy
-                                                      ) * 100
-    
+                                                      ) * 100'''
+    df['user'] = df['user'].round(3) * 100 # Round for readibility
+    df.ix['producer', labels] = df.ix['producer', labels,].round(3) * 100
     # Recalc totals with area-adjusted estimates
-    df.ix[labels, labels] = df_adj
-    df['total'] = df.ix[labels, labels].sum(axis=1)
-    df.ix['total'] = df.ix[labels, labels].sum(axis=0)
+    #df.ix[labels, labels] = df_adj
+    df['total_adj'] = df_adj.ix[labels, labels].sum(axis=1)
+    df.ix['total_adj'] = df_adj.ix[labels, labels].sum(axis=0)
     
     # Calc kappa and disagreement
     kappa = kappa_coeff(df, labels, accuracy)
     df.ix['producer', 'user'] = round(100 * accuracy, 1)
     df.ix['producer', 'kappa'] = round(kappa, 3)
-    disagree_q, total_q = quantity_disagreement(df, labels)
+    '''disagree_q, total_q = quantity_disagreement(df, labels)
     disagree_a, total_a = allocation_disagreement(df, labels)
     df.ix[labels, 'quanitity'] = disagree_q
     df.ix['producer', 'quanitity'] = total_q
     df.ix[labels, 'allocation'] = disagree_a
-    df.ix['producer', 'allocation'] = total_a
+    df.ix['producer', 'allocation'] = total_a'''
 
     # Fill in the empty rows
-    '''empty_df = pd.DataFrame(np.full((len(empyt_bins, df.shape[1]), np.nan)), columns=labels)
-    empty_df.index = empty_bins
-    df = df.append(empty_df)
-    
-    # Fill in the empty cols
-    for b in empty_bins:
-        df[b] = np.nan
-   
-   labels += empty_bins  
-    df = df[labels + ['total_pxl','pct_area','total','user','u_ci','acc_ci','kappa','quanitity','allocation']]'''
     labels += empty_bins
-    out_cols = labels + ['total_pxl','pct_area','total','user','u_ci','acc_ci','kappa','quanitity','allocation']
-    out_index = labels + ['producer', 'total', 'p_ci']
+    out_cols = labels + ['total_pxl','pct_area','total', 'total_adj', 'user','u_ci','acc_ci','kappa','quanitity','allocation']
+    out_index = labels + ['producer', 'total', 'total_adj', 'p_ci']
     df = df.reindex(index=out_index, columns=out_cols)
     
+    df_smp = df.copy()
+    df.loc[labels, labels] = df_adj.loc[labels, labels]
+    
     if out_txt:
-        df.to_csv(out_txt, sep='\t')
-        if not silent: print '\nDataframe written to: ', out_txt 
+        df_smp.to_csv(out_txt.replace('.txt', '_sample.txt'), sep='\t')
+        df.to_csv(out_txt.replace('.txt', '_proportion.txt'), sep='\t')
+        if not silent: print '\nDataframe written to: ', out_txt
+        
     
     if not silent: print '\nTotal time: %.1f minutes' % ((time.time() - t0)/60)
-    return df#"""
+    return df, df_smp#"""
 
 
 def kappa_coeff(df, labels, accuracy):
@@ -646,6 +642,37 @@ def allocation_disagreement(df, class_labels):
     total_a = np.nansum(disagree_a) / 2
     
     return disagree_a, total_a
+    
+
+def calc_ci(df, labels, z_score=1.96):
+    ''' Calc confidence intervals in place'''
+    # Calc user's confidence interval
+    user = df.loc[labels, 'user']
+    total = df.loc[labels, 'total']
+    variance_u = user * (1 - user)/(total - 1) #From Oloffson et al. 2014
+    df.loc[labels, 'u_ci'] = np.round(variance_u**.5 * z_score, 3) * 100
+    
+    # Calc overall confidence interval
+    variance_o = np.sum(df.loc[labels, 'pct_area']**2 * variance_u) #From Oloffson 2014
+    df.ix['producer', 'acc_ci'] = round(variance_o**.5 * z_score, 3) * 100
+    
+    # Calc producer's confidence interval
+    variance_p = []
+    for j in labels:
+        # estimated total pixel count in reference map for this class
+        Nj_hat = np.sum(df.ix[labels, 'total_pxl']/df.ix[labels, 'total'] * df.ix[labels, j])
+        Nj = df.ix[j, 'total_pxl'] #total pixel count in this map class
+        nj = df.ix[j, 'total'] # total sample count in this reference class
+        Ni = df.ix[labels != j, 'total_pxl'] #total pixel count in each map class
+        ni = df.ix[labels != j, 'total'] #total sample count in each map class
+        p = df.ix['producer', j]
+        u = df.ix[j, 'user']
+        nij_ni = df.ix[labels != j, j]/ni #ratio of sample count correct to total sample
+        v = (1/Nj_hat**2) * ((Nj**2 * (1 - p)**2 * u * (1 - u))/(nj - 1) +\
+                            p**2 * np.sum(Ni**2 * nij_ni * (1 - nij_ni)/(ni - 1)))
+        variance_p.append(v)
+    df.ix['p_ci', labels] = np.round(np.array(variance_p)**.5 * z_score, 3) * 100
+    
     
 
 def confidence_interval(class_totals, map_totals, pct_areas, class_accuracy, z_score=1.96):
