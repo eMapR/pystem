@@ -12,7 +12,9 @@ from osgeo import gdal
 from multiprocessing import Pool
 
 import randomforest as forest
-from stem import evaluate_ebird, evaluate_by_lc
+#from stem import evaluate_ebird, evaluate_by_lc
+package_dir = os.path.join(os.path.dirname(__file__), '..')
+sys.path.append(package_dir)
 import stem
 import mosaic_by_tsa as mosaic
 
