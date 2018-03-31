@@ -205,7 +205,7 @@ def kernel_from_shp(mosaic_lyr, feature, mosaic_tx, nodata, val_field='name', re
         wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}))'.format(feature.ul_x,feature.ul_y, feature.lr_x, feature.lr_y)
         support_set = ogr.CreateGeometryFromWkt(wkt)
         support_set.CloseRings()
-    elif type(feature) == int:
+    elif isinstance(feature, int):
         set_feature = mosaic_lyr.GetFeature(feature)
         support_set = set_feature.GetGeometryRef()
     else:
@@ -242,12 +242,16 @@ def kernel_from_shp(mosaic_lyr, feature, mosaic_tx, nodata, val_field='name', re
 
     #Get number of rows and cols of the output array and the input layer
     x1, x2, y1, y2 = support_set.GetEnvelope()
-    cols = abs(int((x2 - x1)/x_res))
-    rows = abs(int((y2 - y1)/y_res))
+    #cols = abs(int((x2 - x1)/x_res))
+    #rows = abs(int((y2 - y1)/y_res))
+    cols = abs(int(round((x2 - x1)/x_res, 0)))
+    rows = abs(int(round((y2 - y1)/x_res, 0)))
     
     m_xmin, m_xmax, m_ymin, m_ymax = mosaic_lyr.GetExtent()
-    xsize = abs(int((m_xmax - m_xmin)/x_res))
-    ysize = abs(int((m_ymax - m_ymin)/y_res))
+    #xsize = abs(int((m_xmax - m_xmin)/x_res))
+    #ysize = abs(int((m_ymax - m_ymin)/y_res))
+    xsize = abs(int(round((m_xmax - m_xmin)/x_res, 0)))
+    ysize = abs(int(round((m_ymax - m_ymin)/y_res, 0)))
     
     tx = x1, x_res, 0, y2, 0, y_res #Assumes x > to the east, y > north
     offset = calc_offset((m_xmin, m_ymax), tx)
@@ -330,20 +334,21 @@ def replace_val_with_array(tsa_ar, data_ar, tsa_id, offset, ar_out):
 
 def get_min_numpy_dtype(ar):
     
-    max_val = ar.max()
-    min_val = ar.min()
+    max_val = np.max(ar)
+    min_val = np.min(ar)
     
     if int(max_val) == max_val: #no loss of precision
+        
+        if min_val >= 0 and max_val <= 255:
+            return np.uint8
+
         if min_val >= -128 and max_val <= 127:
             return np.int8
-        
-        if min_val <= 0 and max_val <= 255:
-            return np.uint8
-        
-        if min_val <= -32768 and max_val >= 32767:
+            
+        if min_val >= -32768 and max_val <= 32767:
             return np.int16
             
-        if min_val <= 0 and max_val >= 65535:
+        if min_val >= 0 and max_val <= 65535:
             return np.uint16
         else:
             return np.int32 # Shouldn't be necessary to have unsigned int32
