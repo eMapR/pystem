@@ -30,7 +30,6 @@ gdal.UseExceptions()
 
 '''
 TODO: 
--try predicting each set within a tile per thread
 -add support for generic on-the-fly tiles if user doesn't want to use 
 mosaic_shp tiles
 '''
@@ -201,9 +200,8 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     support_nrows = int(support_size[0]/abs(y_res))
     support_ncols = int(support_size[1]/abs(x_res))
     t1 = time.time()
-    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles[tiles['name'].isin(['1092', '3224'])].iterrows())]    
-    #args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.iterrows())]
-    
+    #args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles[tiles['name'].isin(['1092', '3224'])].iterrows())]    
+    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.iterrows())]
     
     if n_jobs > 1:
         print 'Predicting with %s jobs...\n' % n_jobs
@@ -226,10 +224,10 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         dtype = mosaic.get_min_numpy_dtype(limits[stat])
         if stat == 'stdv':
             this_nodata = -9999
-            ar = np.full((ysize, xsize), this_nodata, dtype=np.int16) 
+            ar = np.full((ysize, xsize), this_nodata, dtype=dtype) 
         else:
             this_nodata = nodata
-            ar = np.full((ysize, xsize), this_nodata, dtype=np.uint8)
+            ar = np.full((ysize, xsize), this_nodata, dtype=dtype)
         
         for tile_id, tile_coords in tiles.iterrows():
             tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_coords[tile_id_field], stat))

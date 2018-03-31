@@ -4,7 +4,6 @@ Created on Thu Nov 16 11:19:00 2017
 
 @author: shooper
 """
-
 import sys, os, warnings
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,8 +27,8 @@ except:
 
 try:
     from randomforest import *
-    warnings.warn('Could not import randomforest module', ImportWarning)
 except:
+    warnings.warn('Could not import randomforest module', ImportWarning)
     pass
 
         
