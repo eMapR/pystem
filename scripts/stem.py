@@ -32,7 +32,7 @@ import numpy as np
 
 # Import ancillary scripts
 import mosaic_by_tsa
-import evaluation as ev
+#import evaluation as ev
 from lthacks import get_min_numpy_dtype, array_to_raster, df_to_shp, stats_functions #using this makes no longer portable to any other system than Islay
 
 gdal.UseExceptions()
@@ -761,13 +761,16 @@ def calc_oob_metrics(dt, oob_response, oob_predictors, model_type='classifier', 
     # If the model is a regressor, calculate the R squared and RMSE
     if model_type.lower() == 'regressor':
         oob_rate = metrics.r2_score(oob_response, oob_prediction)
-        # For rmse, subtract from max val so that scale mataches other oob metrics
+        oob_rmse = stats_functions.rmse(oob_response, oob_prediction)
+        '''# For rmse, subtract from max val so that scale mataches other oob metrics
         try:
-            oob_rmspe = (max_val - stats_functions.rmse(oob_response, oob_prediction))/max_val
+            oob_rmspe = (1 - (max_val - oob_rmse)/max_val) * 100
         except ZeroDivisionError:
             oob_rmspe = max_val - stats_functions.rmse(oob_response, oob_prediction)
+        oob_metrics['oob_rmse'] = int(round(oob_rmspe * 100, 0))'''
+        oob_metrics['oob_rmse'] = int(round(oob_rmse, 0))
         oob_metrics['oob_rate'] = int(round(oob_rate * 100, 0))
-        oob_metrics['oob_rmse'] = int(round(oob_rmspe))
+        
     
     # Otherwise, get the percent correct and kappa
     else:
@@ -2022,7 +2025,7 @@ def aggregate_predictions(n_tiles, ysize, xsize, nodata, nodata_mask, tx, suppor
     return pct_importance, df_sets
 
 
-def evaluate_ebird(sample_txt, ar, tx, cell_size, target_col, n_per_cell, n_trials=50, year=None):
+'''def evaluate_ebird(sample_txt, ar, tx, cell_size, target_col, n_per_cell, n_trials=50, year=None):
     t0 = time.time()
     
     df_test = pd.read_csv(sample_txt, sep='\t', index_col='obs_id')
@@ -2153,7 +2156,7 @@ def evaluate_by_lc(df, ar, lc_path, target_col, lc_classes=None, ar_nodata=255):
         df_stats = df_stats.append(pd.DataFrame([lc_dict],
                                                  index=[lc]))
     df_stats.set_index('lc_class', inplace=True)
-    return df_stats.sort_index()
+    return df_stats.sort_index()'''
 
 
 def predict_set_from_disk(df_sets, set_id, params):
