@@ -48,6 +48,7 @@ def read_params(txt):
 def parse_bins(bin_str):
     ''' Integerize a string of min:max and return as a list of length 2'''
     bin_list = [b.split(':') for b in bin_str.split(',')]
+    #for b in bin
     bins = [(int(mn), int(mx)) for mn, mx in bin_list]
     
     return bins
@@ -92,8 +93,7 @@ def calc_proportional_area(df_tiles, shp):
         #Calulate intersection
         try:
             intersection = tile.Intersection(shp_boundary)
-            area = intersection.GetArea()
-            df_tiles.ix[i, 'area'] = area
+            df_tiles.ix[i, 'area'] = intersection.GetArea()
         except:
             print 'Problem with tile', i
 
@@ -109,7 +109,7 @@ def calc_strata_sizes(ar, nodata_mask, sample_size, bins, scheme='proportional',
     n_pixels = float(ar[nodata_mask].size)
 
     if scheme == 'proportional':
-        counts, _ = np.histogram(ar, bins=[b[1] for b in bins] + [bins[-1][1] + 1])# bin param for np.histogram is all left edge ecxept last is right edge
+        counts, _ = np.histogram(ar, bins=[b[0] for b in bins] + [bins[-1][1] + 1])# bin param for np.histogram is all left edge ecxept last is right edge
         bin_percents = counts.astype(np.float)/n_pixels
         pcts_center = (bin_percents.max() - bin_percents.min())/2.0 #middle of range
         scaled_dif = (bin_percents - pcts_center)/float(bin_scale)
@@ -133,7 +133,7 @@ def calc_strata_sizes(ar, nodata_mask, sample_size, bins, scheme='proportional',
     return n_per_bin, scaled_percents
     
 
-def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, bins, min_sample=None, max_sample=None, pct_train=1, nodata=None, sampling_scheme='equal', zero_inflation=None, data_type='continuous', kernel=False, n_tiles=(1, 1), boundary_shp=None, bin_scale=1, n_per_tile=None):
+def stratified_sample(raster_path, col_name, data_band, n_sample, bins, min_sample=None, max_sample=None, pct_train=1, nodata=None, sampling_scheme='equal', zero_inflation=None, data_type='continuous', kernel=False, n_tiles=(1, 1), boundary_shp=None, bin_scale=1, n_per_tile=None, mask_tile=False):
     '''
     Return a dataframe of stratified randomly sampled pixels from raster_path
     '''
@@ -148,7 +148,7 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
         if nodata == None:
             sys.exit('Could not obtain nodata value from dataset and' +\
             ' none specified in parameters file. Try re-running with' +\
-            'nodata specified.')
+            'nodata specified.')    
     
     # Split up the raster into tiles and figure out how 
     print 'Calculating sample size per tile...'
@@ -170,15 +170,15 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
         if n_per_tile:
             pct_area = df_tiles.pct_area
             df_tiles['pct_max_sample'] = pct_area / (pct_area.max() - pct_area.min())
-            df_tiles_rc['n_samples'] = (n_per_tile * df_tiles.pct_max_sample).astype(int)
+            df_tiles_rc['n_sample'] = (n_per_tile * df_tiles.pct_max_sample).astype(int)
         else:
-            df_tiles_rc['n_samples'] = n_samples * df_tiles.pct_area
+            df_tiles_rc['n_sample'] = (n_sample * df_tiles.pct_area).astype(int)
     else:
         if n_per_tile:
-            df_tiles_rc['n_samples'] = n_per_tile
+            df_tiles_rc['n_sample'] = n_per_tile
         else:
-            df_tiles_rc['n_samples'] = float(n_samples)/total_tiles 
-    df_tiles['n_samples'] = df_tiles_rc.n_samples
+            df_tiles_rc['n_sample'] = float(n_sample)/total_tiles 
+    df_tiles['n_sample'] = df_tiles_rc.n_sample
     print '%.1f minutes\n' % ((time.time() - t1)/60) 
     
     # For each tile, get random sample for each bin
@@ -191,8 +191,8 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
     df_tiles = df_tiles.reindex(columns=df_tiles.columns.tolist() + classes, fill_value=0)
     for c, (i, tile_coords) in enumerate(df_tiles_rc.iterrows()):
         t1 = time.time()
-        print 'Sampling for %d pixels for tile %s of %s...' % (tile_coords.n_samples, c + 1, total_tiles)
-        if tile_coords.n_samples == 0:
+        print 'Sampling for %d pixels for tile %s of %s...' % (tile_coords.n_sample, c + 1, total_tiles)
+        if tile_coords.n_sample == 0:
             print '\tSkipping this tile because all pixels == nodata...\n'
             empty_tiles.append(i)
             continue
@@ -212,23 +212,30 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
         ar_rows = ar_rows + ul_r
         ar_cols = ar_cols + ul_c
         
-        n_per_bin, scaled_pcts = calc_strata_sizes(ar, nodata_mask, tile_coords.n_samples, bins, sampling_scheme, bin_scale, zero_inflation)
+        n_per_bin, scaled_pcts = calc_strata_sizes(ar, nodata_mask, tile_coords.n_sample, bins, sampling_scheme, bin_scale, zero_inflation)
         df_tiles.ix[i, classes] = n_per_bin #record sample size per bin
+        this_min_sample = min_sample
+        this_max_sample = max_sample
+        if min_sample < 1 and min_sample is not None:
+            this_min_sample = int(tile_coords.n_sample * min_sample)
+        if max_sample < 1 and max_sample is not None:
+            this_max_sample = int(tile_coords.n_sample * max_sample)
         
         for i, (this_min, this_max) in enumerate(bins):
             #t2 = time.time()
             
             try:
-                this_sample_size = n_per_bin[i]
-                if min_sample:
-                    this_sample_size = int(max(n_per_bin[i], min_sample))
-                if max_sample:
-                    if max_sample < this_sample_size:
-                        this_sample_size = max_sample
+                this_sample_size = int(n_per_bin[i])
+                if this_min_sample:
+                    this_sample_size = int(max(n_per_bin[i], this_min_sample))
+                if this_max_sample:
+                    if this_max_sample < this_sample_size:
+                        this_sample_size = this_max_sample
 
             except:
                 import pdb; pdb.set_trace()
             print 'Sampling between %s and %s: %s pixels (%.1f%% of sample for this tile) ' % (this_min, this_max, this_sample_size, scaled_pcts[i] * 100)
+            
             mask = (ar > this_min) & (ar <= this_max) & nodata_mask
             these_rows = ar_rows[mask]
             these_cols = ar_cols[mask]
@@ -245,17 +252,18 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
                 tr_rows = these_rows
                 tr_cols = these_cols
             else:
-                samples = random.sample(xrange(len(these_rows)), this_sample_size)
+                try:
+                    samples = random.sample(xrange(len(these_rows)), this_sample_size)
+                except:
+                    import pdb; pdb.set_trace()
                 tr_rows = these_rows[samples]
                 tr_cols = these_cols[samples]
 
-
-            
             # If pct_train is specified, split the sample indices into train/test sets
             te_rows = []
             te_cols = []
-            if pct_train:
-                split_ind = len(tr_rows) * pct_train
+            if pct_train < 1:
+                split_ind = int(len(tr_rows) * pct_train)
                 te_rows = tr_rows[split_ind:]
                 te_cols = tr_cols[split_ind:]
                 tr_rows = tr_rows[:split_ind]
@@ -269,6 +277,7 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
         print 'Time for this tile: %.1f minutes\n' % ((time.time() - t1)/60)
     del tr_rows, tr_cols, te_rows, te_cols, ar
     
+    ''' change this so that I sample with each tile, not all at once at the end'''
     # Read the whole raster in to extract stuff
     ar = band.ReadAsArray()
     
@@ -287,11 +296,11 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
                              'row': train_rows,
                              'col': train_cols,
                              col_name: train_vals
-                             })
+                             }).reindex(index=np.arange(len(train_x)))
                              
     # If training and testing samples were split, get test vals                    
     df_test = None
-    if pct_train > 1:
+    if pct_train < 1:
         if kernel:
             test_vals = extract_by_kernel(ar, train_rows, train_cols, data_type, col_name, nodata)
         else:
@@ -303,7 +312,7 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
                                 'row': test_rows,
                                 'col': test_cols,
                                 col_name: test_vals
-                                })
+                                }).reindex(index=np.arange(len(test_x)))
     ds = None
     
     # In case empty tiles weren't filtered out already
@@ -312,7 +321,7 @@ def get_stratified_sample_by_tile(raster_path, col_name, data_band, n_samples, b
     return df_train, df_test, df_tiles
 
 
-def main(params, data_band=1, nodata=None, sampling_scheme='proportional', data_type='continuous', kernel=False, boundary_shp=None, bin_scale=1, min_sample=None, max_sample=None, n_samples=None, n_per_tile=None):
+def main(params, data_band=1, pct_train=None, nodata=None, sampling_scheme='proportional', data_type='continuous', kernel=False, boundary_shp=None, bin_scale=1, min_sample=None, max_sample=None, n_sample=None, n_per_tile=None, mask_tile=False):
     
     t0 = time.time()
     data_band = None
@@ -330,29 +339,23 @@ def main(params, data_band=1, nodata=None, sampling_scheme='proportional', data_
         os.makedirs(out_dir)'''
     
     # Integerize numeric params
-    if 'data_band' in locals(): data_band = int(data_band)
-    if 'nodata' in locals(): nodata = int(nodata)
-    if 'pct_train' in locals(): 
-        pct_train = float(pct_train)
-    else: 
-        pct_train = None
-    if zero_inflation: zero_inflation = int(zero_inflation)
-    if 'bin_scale' in inputs:
-        bin_scale = float(bin_scale)
-    if 'min_sample' in inputs:
-        min_sample = int(min_sample)
-    if 'max_sample' in inputs:
-        max_sample = int(max_sample)
-    if 'n_per_tile' in inputs:
-        n_per_tile = int(n_per_tile)
-    if 'n_samples' in inputs:
-        n_samples = int(n_samples)
+    if 'data_band' in inputs: data_band = int(data_band)
+    if 'nodata' in inputs: nodata = int(nodata)
+    if 'pct_train' in inputs: pct_train = float(pct_train)
+    if zero_inflation in inputs: zero_inflation = int(zero_inflation)
+    if 'bin_scale' in inputs: bin_scale = float(bin_scale)
+    if 'min_sample' in inputs: min_sample = float(min_sample)
+    if 'max_sample' in inputs: max_sample = float(max_sample)
+    if 'n_per_tile' in inputs: n_per_tile = int(n_per_tile)
+    if 'n_sample' in inputs:  n_sample = int(n_sample)
     try:
        bins = parse_bins(bins)
     except NameError as e:
         missing_var = str(e).split("'")[1]
         msg = "Variable '%s' not specified in param file:\n%s" % (missing_var, params)
         raise NameError(msg)
+    if sampling_scheme == 'equal' and not n_sample:
+        raise RuntimeError('sampling_scheme was "equal" but n_sample not given')
     
     # If number of tiles not given, need to calculate them
     if 'n_tiles' in inputs:
@@ -363,19 +366,24 @@ def main(params, data_band=1, nodata=None, sampling_scheme='proportional', data_
         
     
     # Generate samples
-    df_train, df_test, df_tiles = get_stratified_sample_by_tile(raster_path, col_name,
-                                                      data_band, n_samples,
-                                                      bins, min_sample, max_sample, pct_train, nodata,
-                                                      sampling_scheme, zero_inflation, data_type,
-                                                      kernel, n_tiles, boundary_shp, 
-                                                      bin_scale=bin_scale, n_per_tile=n_per_tile)
+    df_train, df_test, df_tiles = stratified_sample(raster_path, col_name,
+                                                    data_band, n_sample,
+                                                    bins, min_sample, max_sample,
+                                                    pct_train, nodata,
+                                                    sampling_scheme,
+                                                    zero_inflation, data_type,
+                                                    kernel, n_tiles, 
+                                                    boundary_shp,
+                                                    bin_scale=bin_scale,
+                                                    n_per_tile=n_per_tile,
+                                                    mask_tile=mask_tile)
     df_train['obs_id'] = df_train.index
     
     # Write samples to text file
     now = datetime.now()
     date_str = str(now.date()).replace('-','')
     time_str = str(now.time()).replace(':','')[:4]
-    bn = '{0}_{1}_sample_{2}_{3}_{4}.txt'.format(col_name, sampling_scheme, len(df_train), date_str, time_str)
+    bn = '{0}_{1}_{2}_{3}_{4}.txt'.format(col_name, sampling_scheme, len(df_train), date_str, time_str)
     #bn = os.path.basename(out_txt)
     stamp = bn[:-4]
     out_dir = os.path.join(out_dir, stamp)
@@ -387,7 +395,7 @@ def main(params, data_band=1, nodata=None, sampling_scheme='proportional', data_
     
     shutil.copy2(params, out_dir) #Copy the params for reference
     
-    if pct_train > 1:
+    if pct_train < 1:
         df_test['obs_id'] = df_test.index
         test_txt = out_txt.replace('%s.txt' % stamp, '%s_test.txt' % stamp)
         df_test.to_csv(test_txt, sep='\t', index=False)
