@@ -6,7 +6,6 @@ The STEM is an ensemble of locally defined, randomly located, spatially overalpp
 ![alt text](https://github.com/eMapR/stem/blob/master/misc/support_sets.jpg "STEM illustration")
 
 
-__[Processing workflow](https://drive.google.com/open?id=1aAGngR0K3HwjeI5brjXHkTEwbwgg3YuUctTQKFnCoUA)__
 
 ## References
 Fink, Daniel, Wesley M. Hochachka, Benjamin Zuckerberg, David W. Winkler, Ben Shaby, M. Arthur Munson, Giles Hooker, Mirek Riedewald, Daniel Sheldon, and Steve Kelling. 2010. “Spatiotemporal Exploratory Models for Broad-Scale Survey Data.” Ecological Applications 20 (8): 2131–2147.
