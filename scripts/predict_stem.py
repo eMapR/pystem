@@ -122,7 +122,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             cmd = 'ogr2ogr -clipsrc {clip_shp} {out_shp} {in_shp}'.format(clip_shp=subset_shp, out_shp=out_shp, in_shp=mosaic_path)
             subprocess.call(cmd, shell=True)#'''
             mosaic_path = out_shp
-        mosaic_dataset = ogr.Open(mosaic_path)
+        mosaic_dataset = ogr.Open(mosaic_path, 1)
         mosaic_ds = mosaic_dataset.GetLayer()
         min_x, max_x, min_y, max_y = mosaic_ds.GetExtent()
         if 'resolution' not in inputs:
@@ -130,9 +130,19 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         # If subset specified, just get sets that overlap the subset
         if 'subset_shp' in inputs:
             mosaic_geom = ogr.Geometry(ogr.wkbMultiPolygon)
+            i = 0
             for feature in mosaic_ds:
-                mosaic_geom.AddGeometry(feature.GetGeometryRef())
-            df_sets = stem.get_overlapping_sets(df_sets, mosaic_geom)
+                g = feature.GetGeometryRef()
+                # Check that the feature is valid. Clipping can produce a feautre
+                #  w/ an area of 0
+                if g.GetArea() > 1:
+                    mosaic_geom.AddGeometry(g)
+                else:
+                    fid = feature.GetFID()
+                    feature.Destroy()
+                    mosaic_ds.DeleteFeature(fid)
+            #import pdb; pdb.set_trace()
+            df_sets = stem.get_overlapping_sets(df_sets, mosaic_geom.UnionCascaded())
         xsize = int((max_x - min_x)/resolution)
         ysize = int((max_y - min_y)/resolution)
         prj = mosaic_ds.GetSpatialRef().ExportToWkt()
@@ -183,7 +193,10 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         for stat in agg_stats:
             pattern = re.compile('tile_\d+_%s.tif' % stat)
             stat_match = [f.split('_')[1] for f in files if pattern.match(f)]
-            tile_files[stat] = pd.Series(np.ones(len(stat_match)), index=stat_match)
+            try:
+                tile_files[stat] = pd.Series(np.ones(len(stat_match)), index=stat_match)
+            except:
+                import pdb; pdb.set_trace()
         index_field = tiles.index.name
         tiles[index_field] = tiles.index
         tiles = tiles.set_index(tile_id_field, drop=False)[tile_files.isnull().any(axis=1)]
