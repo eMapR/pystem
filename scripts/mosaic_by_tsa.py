@@ -223,8 +223,8 @@ def kernel_from_shp(mosaic_lyr, feature, mosaic_tx, nodata, val_field='name', re
     for i in range(lyr_def.GetFieldCount()):
         field_def = lyr_def.GetFieldDefn(i)
         intersection_lyr.CreateField(field_def)
-    for i in xrange(mosaic_lyr.GetFeatureCount()):
-        feature = mosaic_lyr.GetFeature(i)
+    for feature in mosaic_lyr:#xrange(mosaic_lyr.GetFeatureCount()):
+        #feature = mosaic_lyr.GetFeature(i)
         g = feature.GetGeometryRef()
         g.CloseRings()
         if g.Intersects(support_set):
