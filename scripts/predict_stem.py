@@ -53,9 +53,10 @@ joblib.delayed(stem.predict_pixel)
     
 
 def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolution=30, n_jobs=0, n_jobs_agg=0, mosaic_nodata=0, snap_coord=None, overwrite_tiles=False, tile_id_field='name'):
-    inputs, df_var = stem.read_params(params)
+    inputs = stem.read_params(params)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])    
+    df_var = pd.read_csv(var_info, sep='\t', index_col='var_name')
     df_var.data_band = [int(b) for b in df_var.data_band]#sometimes read as float
 
     try:
@@ -69,9 +70,10 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     
     # Check that all the variables given were used in training and vice versa
     try:
-        train_inputs, train_vars = stem.read_params(train_params)
+        train_inputs = stem.read_params(train_params)
     except:
         raise NameError('train_params not specified or does not exist')
+    train_vars = pd.read_csv(train_inputs['var_info'].replace('"',''), sep='\t', index_col='var_name')
     train_vars = sorted(train_vars.index)
     pred_vars  = sorted(df_var.index)
     # Make sure vars are sorted alphabetically since they were for training
@@ -108,7 +110,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         with engine.connect() as con, con.begin():
             df_sets = pd.read_sql_table('support_sets', con, index_col='set_id')#'''
     else:
-        set_txt = glob.glob(os.path.join(model_dir, 'decisiontree_models/*support_sets.txt'))[0]
+        set_txt = stem.find_file(model_dir, '*support_sets.txt')
         if not os.path.isfile(set_txt):
             raise IOError('No database or support set txt file found')
         df_sets = pd.read_csv(set_txt, sep='\t', index_col='set_id')
