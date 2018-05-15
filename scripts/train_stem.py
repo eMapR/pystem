@@ -14,18 +14,31 @@ import sqlite3
 import sqlalchemy
 from datetime import datetime
 from osgeo import gdal, ogr
+from sklearn.externals.joblib import Parallel, delayed
 import pandas as pd
 import numpy as np
 import cPickle as pickle
+from multiprocessing import Pool
 
-# Import ancillary scripts
 import stem
-#import generate_gsrd as gsrd
 
-def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_oob_map=False, snap_coord=None, oob_map_metric='oob_rate'):
+def _par_train_stem(n_jobs, n_sets, df_train, predict_cols, target_col, min_obs, df_sets, model_func, model_type, max_features, dt_path_template, db_path, max_val):
+    
+    """ private helper function to avoid exec free variable error"""
+    start_time = time.time()
+    s = Parallel(n_jobs, backend="threading")(
+            delayed(stem.par_train_estimator)(
+                i, n_sets, start_time, df_train, predict_cols, target_col,
+                min_obs, set_info, model_func, model_type, max_features,
+                dt_path_template, db_path, max_val) 
+                for i, (set_id, set_info) in enumerate(df_sets.iterrows()))
+    return s
+    
+
+def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_oob_map=False, snap_coord=None, oob_map_metric='oob_rate', n_jobs=1, oob_drop=None):
     t0 = time.time()
     
-    inputs, df_var = stem.read_params(params)
+    inputs = stem.read_params(params)
     
     # Convert params to named variables and check for required vars
     for i in inputs:
@@ -41,6 +54,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         missing_var = str(e).split("'")[1]
         msg = "Variable '%s' not specified in param file:\n%s" % (missing_var, params)
         raise NameError(msg)
+    df_var = pd.read_csv(var_info, sep='\t', index_col='var_name')
 
     # Read in training samples and check that df_train has exactly the same
     #   columns as variables specified in df_vars    
@@ -54,6 +68,10 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         raise NameError(msg)
     if target_col not in df_train.columns:
         raise NameError('target_col "%s" not in sample_txt: %s' % (target_col, sample_txt))
+    if 'max_target_val' in inputs:
+        max_target_val = int(max_target_val)
+    else:
+        max_target_val = df_train[target_col].max()
     
     # Make a timestamped output directory if outdir not specified
     now = datetime.now()
@@ -80,9 +98,9 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         snap_coord = [int(c) for c in snap_coord.split(',')]
     out_txt = os.path.join(out_dir, stamp + '.txt')
     df_sets = stem.get_gsrd(mosaic_path, cell_size, support_size,
-                                              sets_per_cell, df_train, min_obs,
-                                              target_col, predict_cols, out_txt,
-                                              gsrd_shp, pct_train, snap_coord=snap_coord)
+                            sets_per_cell, df_train, min_obs,
+                            target_col, predict_cols, out_txt,
+                            gsrd_shp, pct_train, snap_coord=snap_coord)
     n_sets = len(df_sets)            
     
     # Create SQL DB and add train sample table
@@ -90,7 +108,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     t1 = time.time()
     db_path = os.path.join(out_dir, stamp + '.db')
     engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
-    df_train.to_sql('train_sample', engine, chunksize=10000)
+    #df_train.to_sql('train_sample', engine, chunksize=10000)
     print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Train a tree for each support set
@@ -114,77 +132,45 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         os.mkdir(dt_dir)
     dt_path_template = os.path.join(dt_dir, stamp + '_decisiontree_%s.pkl')
     
-    # establish DB connection and create empty relationship table for sample inds
-    cmd = ('CREATE TABLE set_samples (set_id INTEGER, sample_id INTEGER, in_bag INTEGER);')
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(cmd)
-        connection.commit()
-    insert_cmd = 'INSERT INTO set_samples (set_id, sample_id, in_bag) VALUES (?,?,?);'
+    #oob_rates = [0]
+    n_jobs = int(n_jobs)
+
+    sets = _par_train_stem(n_jobs, n_sets, df_train, predict_cols, target_col,
+                           min_obs, df_sets, model_func, model_type, max_features,
+                           dt_path_template, db_path, max_target_val)
+    support_sets, samples = zip(*sets)
+    df_sets = pd.DataFrame(list(support_sets))\
+                .dropna(subset=['dt_file'])\
+                .rename_axis('set_id')
+    df_sets.to_csv(os.path.join(out_dir, 'support_sets.txt'), sep='\t')
     
-    oob_rates = [0]
-    for i, (set_id, ss) in enumerate(df_sets.iterrows()):
-        format_tuple = i + 1, n_sets, float(i)/n_sets * 100, (time.time() - t1)/60, np.mean(oob_rates)
-        sys.stdout.write('\rTraining %s/%s DTs (%.1f%%) || %.1f minutes || Avg OOB: %d' % format_tuple)
-        sys.stdout.flush()
-
-        # Get all samples within support set
-        sample_inds = df_train.index[(df_train['x'] > ss[['ul_x', 'lr_x']].min()) &
-        (df_train['x'] < ss[['ul_x', 'lr_x']].max()) &
-        (df_train['y'] > ss[['ul_y', 'lr_y']].min()) &
-        (df_train['y'] < ss[['ul_y', 'lr_y']].max())]
-        
-        n_samples = int(len(sample_inds) * .63)
-        if n_samples < min_obs:
-            df_sets.drop(set_id, inplace=True)
-            continue
-        
-        this_x = x_train.ix[sample_inds]
-        this_y = y_train.ix[sample_inds]
-        support_set = df_sets.ix[set_id]
-        dt_path = dt_path_template % set_id
-        dt_model, train_inds, oob_inds, importance, oob_metrics = stem.train_estimator(support_set, n_samples, this_x, this_y, model_func, model_type, max_features, dt_path)
-        oob_rates.append(oob_metrics['oob_rate'])
-        df_sets.ix[set_id, importance_cols] = importance
-        df_sets.ix[set_id, 'dt_model'] = dt_model
-        df_sets.ix[set_id, 'dt_file'] = dt_path
-        df_sets.ix[set_id, 'n_samples'] = n_samples
-        for metric in oob_metrics:
-            df_sets.ix[set_id, metric] = oob_metrics[metric]
-        
-        # Save oob and train inds
-        n_train = len(train_inds)
-        n_oob = len(oob_inds)
-        train_records = zip(np.full(n_train, set_id, dtype=int),
-                            train_inds,
-                            np.ones(n_train, dtype=int))
-        oob_records   = zip(np.full(n_oob, set_id, dtype=int),
-                            oob_inds,
-                            np.zeros(n_oob, dtype=int))
-        
-        #try:
-        with sqlite3.connect(db_path) as connection:
-            connection.executemany(insert_cmd, train_records + oob_records)
-            connection.commit()
-
-    print '\n%.1f minutes\n' % ((time.time() - t1)/60)
+    # Consider moving this back to train function by switching to DBMS with multithread support
+    print '\n\nMaking relationship table for samples and sets...'
+    t1 = time.time()
+    set_samples = pd.concat(list(samples), ignore_index=True)
+    set_samples.to_sql('set_samples', engine, chunksize=100000)
+    print '%.1f minutes\n' % ((time.time() - t1)/60)
     
     # Calculate OOB rates and drop sets with too low OOB
-    print 'Calculating OOB rates...'
+    print 'Calculating OOB rates and dropping sets with high OOB error...'
     t1 = time.time()
-    df_sets, low_oob = stem.get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob)
-    if len(low_oob) > 0:
-        #df_sets.drop(low_oob.index, inplace=True)
+    try:
+        df_sets, low_oob, oob_metric = stem.get_oob_rates(df_sets, df_train, db_path, target_col, predict_cols, min_oob, model_type, drop_expression=oob_drop)
+    except Exception as e:
+        import pdb; pdb.set_trace()
+    if oob_drop and len(low_oob) > 0:
+        df_sets.drop(low_oob.index, inplace=True)
         low_oob_shp = os.path.join(out_dir, 'low_oob_sets.shp')
         low_oob.drop('dt_model', axis=1, inplace=True)
         stem.coords_to_shp(low_oob, gsrd_shp, low_oob_shp)
     set_shp = os.path.join(out_dir, 'support_sets.shp')
     try:
-        stem.coords_to_shp(df_sets, gsrd_shp, set_shp)
+        stem.coords_to_shp(df_sets.drop('dt_model', axis=1), gsrd_shp, set_shp)
     except Exception as e:
+        import pdb; pdb.set_trace()
         print e.message
-    print '%s sets dropped because OOB rate < %s' % (len(low_oob), min_oob)
-    print 'Min OOB rate after dropping: ', df_sets.oob_rate.min()
-    print 'Estimated average OOB score: ', int(df_sets.oob_rate.mean())
+    print 'Min OOB rate after dropping: ', df_sets[oob_metric].min()
+    print 'Estimated average OOB score: ', int(df_sets[oob_metric].mean())
     print '%.1f minutes\n' % ((time.time() - t1)/60)
 
     # Write df_sets and each decison tree to disk
