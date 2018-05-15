@@ -53,15 +53,15 @@ def read_params(txt):
                 '"{0}"'.format(var[1].strip(" ").replace("\n", ""))
             n_skip_lines +=1
     
-    # Get the lines with information about each variable as a df
+    '''# Get the lines with information about each variable as a df
     skip_lines = range(len(input_vars) - n_skip_lines, len(input_vars))
     df_vars = pd.read_csv(txt, sep='\t', index_col='var_name', skip_blank_lines=True, skiprows=skip_lines)
     # Drop any rows for which basepath or search str are empty
     df_vars.dropna(inplace=True, subset=['basepath','search_str'])
-    df_vars.fillna({'path_filter': ''}, inplace=True)
+    df_vars.fillna({'path_filter': ''}, inplace=True)'''
     
     print 'Parameters read from:\n', txt, '\n'
-    return d, df_vars
+    return d#, df_vars
 
 
 def find_file(basepath, search_str, tile_str=None, path_filter=None, year=None):
@@ -419,7 +419,7 @@ def par_extract_by_rowcol(args):
     return extract_by_rowcol(*args[:-1])
     
 
-def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, point_dict, basepath, search_str, path_filter, mosaic_tx, file_count, n_files, nodata=None, kernel=False):
+def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, point_dict, basepath, search_str, path_filter, mosaic_tx, file_count, n_files, nodata=None, kernel=False, silent=True):
     '''
     Return a dataframe of 
     '''
@@ -429,7 +429,7 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, p
     file_col = 'file_' + var_col
     #file_count = last_file
     # Store the filepath for each tile
-    print 'Finding files...\n'
+    if not silent: print 'Finding files...\n'
     t1 = time.time()
     if by_tile:
         df_tile[file_col] = [find_file(basepath, search_str.format(year), tile, path_filter)
@@ -439,14 +439,14 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, p
     # Handle any rows for for which the file is null
     if df_tile[file_col].isnull().any():
         df_null = df_tile[df_tile[file_col].isnull()]
-        print 'Tiles excluded from extractions for %s from %s:' % (var_name, year)
+        if not silent: print 'Tiles excluded from extractions for %s from %s:' % (var_name, year)
         for ind, row in df_null.iterrows(): print row['tile_str']
-        print ''
+        if not silent: print ''
         n_null = len(df_null)
         # Make the file name a unique integer so that it can be
         #   distinguished from real files and from other null files
         df_tile.loc[df_null.index, file_col] = range(n_null)
-    print '%.1f minutes' % ((time.time() - t1)/60)
+    if not silent: print '%.1f minutes' % ((time.time() - t1)/60)
     
     # Get the file string for each xy for each year
     df_xy[file_col] = ''# Creates the column but keeps it empty
@@ -463,8 +463,8 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, p
     #for i, f in enumerate(df_tile[file_col].unique()):
     for i, tile in enumerate(point_dict):
         f = df_tile.ix[df_tile.tile_id == tile, file_col].values[0]
-        print 'Extracting for array %s of approximately %s from:\n%s\n'\
-        % (file_count, n_files, f)
+        if not silent:
+            print 'Extracting for array %s of approximately %s from:\n%s\n' % (file_count, n_files, f)
         dfs.append(extract_by_rowcol(df_xy, point_dict[tile], f, file_col, var_col, data_band,
                                      mosaic_tx, val_cols, data_type, nodata,
                                      kernel
@@ -480,7 +480,7 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, p
     dfs = pool.map(par_extract_by_rowcol, args, 1)
     pool.close()
     pool.join()'''
-    print '\nTime for this variable: %.1f minutes\n' % ((time.time() - t0)/60)
+    if not silent: print '\nTime for this variable: %.1f minutes\n' % ((time.time() - t0)/60)
     #file_count += this_count
     
     # Comnbine all the pieces for this year
@@ -489,12 +489,23 @@ def extract_var(year, var_name, by_tile, data_band, data_type, df_tile, df_xy, p
     return df_var, file_count
     
 
+def par_extract_var(args):
+    ''' Helper for parallel extraction'''
+    df, _ = extract_var(*args[:-1])
+    sys.stdout.write('\rExtracted for %s of %s predictors' % args[-1])
+    sys.stdout.flush()
+    
+    return df
+    
+
 def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id_field=None, n_jobs=0):          
     t0 = time.time()
     # Read params. Make variables from each line of the 1-line variables
-    inputs, df_vars = read_params(params)
+    #inputs, df_vars = read_params(params)
+    inputs = read_params(params)
     for var in inputs:
         exec ("{0} = str({1})").format(var, inputs[var])
+    df_vars = pd.read_csv(var_info, sep='\t', index_col='var_name')
     columns = df_vars.columns
     expected_cols = ['var_name', 'data_type', 'data_band', 'search_str', 'basepath', 'by_tile', 'nodata', 'path_filter']
     #missing_cols = 
@@ -507,6 +518,7 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
         print 'Output directory does not exist. Creating new directory at', out_dir
         os.mkdir(out_dir)
     shutil.copy2(params, out_dir)
+    shutil.copy2(var_info, out_dir)
     
     if not os.path.exists(mosaic_path):
         raise IOError('mosaic_path does not exist: %s' % mosaic_path)
@@ -564,8 +576,6 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
             raise IOError(msg)
         mosaic_tx = mosaic_ds.GetGeoTransform()
         mosaic = mosaic_ds.ReadAsArray()
-        #tile_ids = np.unique(df_tile.tile_id) # Assumes there are coords in all TSAs'''
-
 
     # Only need to do this once per xy sample set
     # Get the tile id at each xy location and the row and col 
@@ -576,19 +586,9 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
         #if len(point_dict) > 0:
         tile_ids = point_dict.keys()
     
-        #df_mosaic = attributes_to_df(mosaic_path)
-        #df_xy = df_xy[~df_xy.tile_fid.isnull()] #drop samples that weren't inside a tile
-        #df_xy['tile_id'] = df_mosaic.ix[df_xy['tile_fid'], tile_id_field].tolist()
-        #tile_id_field = 'tile_id'
-    #import pdb; pdb.set_trace()
-    
     ul_x, x_res, x_rot, ul_y, y_rot, y_res = mosaic_tx
     df_xy['row'] = [int((y - ul_y)/y_res) for y in df_xy.y]
     df_xy['col'] = [int((x - ul_x)/x_res) for x in df_xy.x]
-    #df_xy = df_xy[df_xy.tile_id > 0]
-    #df_xy[tile_id_field] = 0
-        
-    #tile_ids = df_xy['tile_id'].unique()
     
     if 'tile_txt' in inputs:
         df_tile = pd.read_csv(tile_txt, sep='\t', dtype={'tsa_str':object})
@@ -600,18 +600,16 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
     c = 1 #For keeping count of files processed
     n_years = len(years)
     
-    #n_vars = len(df_vars)
-    #import pdb; pdb.set_trace()
     n_files = (len(df_tile) * len(df_vars[df_vars.by_tile == 1])) * n_years +\
     n_years * (len(df_vars[df_vars.data_band < 0]) + len(df_vars[df_vars.data_band > 0]))
     xy_txt_bn = os.path.basename(xy_txt)
-    #out_dir = os.path.join(out_dir, xy_txt_bn.split('.')[0])
-    #if not os.path.exists(out_dir): os.mkdir(out_dir)
+
     last_file = 1
     for year in years:
         t1 = time.time()
         df_yr = pd.DataFrame(index=df_xy.index)
-        for var_name, var_row in df_vars.iterrows(): #var_name is index col
+        args = []
+        for i, (var_name, var_row) in enumerate(df_vars.iterrows()): #var_name is index col
             # Get variables from row
             search_str  = var_row.search_str
             basepath    = var_row.basepath
@@ -629,12 +627,26 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
             else: 
                 data_band = int(var_row.data_band)
 
-            df_var, last_file = extract_var(year, var_name, by_tile, data_band,
+            '''df_var, last_file = extract_var(year, var_name, by_tile, data_band,
                                              data_type, df_tile, df_xy, point_dict, basepath,
                                              search_str, path_filter, mosaic_tx,
                                              last_file, n_files, nodata, kernel)
+            
             df_yr[df_var.columns] = df_var
-            #last_file += this_count
+            #last_file += this_count'''
+            args.append([year, var_name, by_tile, data_band, data_type, df_tile, df_xy, point_dict, basepath, search_str, path_filter, mosaic_tx, last_file, n_files, nodata, kernel, (i, len(df_vars))])
+        
+        if n_jobs > 1:
+            pool = Pool(n_jobs)
+            extractions = pool.map(par_extract_var, args, 1)
+            pool.close()
+            pool.join()
+            for df in extractions:
+                df_yr[df.columns] = df
+        else:
+            for arguments in args:
+                this_df, last_file = extract_var(*arguments)
+                df_yr[this_df.columns] = this_df
         
         # Write df_var with all years for this predictor to txt file
         df_xy[df_vars.index.tolist()] = df_yr[df_vars.index.tolist()]
@@ -665,23 +677,12 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
     
     return out_txt
 
+
 if __name__ == '__main__':
      params = sys.argv[1]
      sys.exit(main(params)) #'''
     
-    
-''' testing '''
-#tsa_mosaic = '/vol/v1/general_files/datasets/spatial_data/calorewash_TSA_nobuffer.bsq'
-#tsa_txt = '/vol/v2/stem/scripts/tsa_orwaca.txt'
-#xy_txt = '/vol/v2/stem/canopy/samples/canopy_sample3000_20160122_1600.txt'
-#basepath = '/vol/v1/proj/lst/outputs/models/randomforest/rfprediction'
-#search_strs = {'landcover': 'lst_run1_prediction_voting_lulc_RF_*%s.tif'}
-#path_filter = None
-#out_dir= '/vol/v2/stem/scripts/testing/'
-#data_type = 'discrete'
-#years = [2001, 2002]
 
-#df_xy = main(tsa_mosaic, tsa_txt, years, basepath, search_strs, path_filter, 1, data_type, out_dir, xy_txt=xy_txt)
 #params = '/vol/v2/stem/param_files/extract_xy_by_tsa_params_topovars.txt'
 #df_xy, df_tile = main(params)
     
