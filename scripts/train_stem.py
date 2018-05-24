@@ -104,14 +104,14 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     n_sets = len(df_sets)            
     
     # Create SQL DB and add train sample table
-    print 'Dumping train_txt to database...'
-    t1 = time.time()
+    '''print 'Dumping train_txt to database...'
+    t1 = time.time()#'''
     db_path = os.path.join(out_dir, stamp + '.db')
-    engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
+    '''engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
     #df_train.to_sql('train_sample', engine, chunksize=10000)
-    print '%.1f minutes\n' % ((time.time() - t1)/60)
+    print '%.1f minutes\n' % ((time.time() - t1)/60)#'''
     
-    # Train a tree for each support set
+    # Split x and y train
     t1 = time.time()
     if model_type.lower() == 'classifier':
         print 'Training STEM with classifier algorithm...'
@@ -145,11 +145,11 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     df_sets.to_csv(os.path.join(out_dir, 'support_sets.txt'), sep='\t')
     
     # Consider moving this back to train function by switching to DBMS with multithread support
-    print '\n\nMaking relationship table for samples and sets...'
+    '''print '\n\nMaking relationship table for samples and sets...'
     t1 = time.time()
     set_samples = pd.concat(list(samples), ignore_index=True)
     set_samples.to_sql('set_samples', engine, chunksize=100000)
-    print '%.1f minutes\n' % ((time.time() - t1)/60)
+    print '%.1f minutes\n' % ((time.time() - t1)/60)'''
     
     # Calculate OOB rates and drop sets with too low OOB
     print 'Calculating OOB rates and dropping sets with high OOB error...'
@@ -177,8 +177,8 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     print 'Saving support set info...'
     #set_txt = os.path.join(dt_dir, stamp + '_support_sets.txt')
     df_sets['set_id'] = df_sets.index
-    #df_sets = df_sets.drop('dt_model', axis=1)#.to_csv(set_txt, sep='\t', index=False)
-    df_sets.drop('dt_model', axis=1).to_sql('support_sets', engine)
+    df_sets = df_sets.drop('dt_model', axis=1)#.to_csv(set_txt, sep='\t', index=False)
+    #df_sets.drop('dt_model', axis=1).to_sql('support_sets', engine)
     t1 = time.time()
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
     
@@ -188,83 +188,6 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     with engine.connect() as con, con.begin():
         df_sets = pd.read_sql_table('support_sets', con, index_col='set_id')
     predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_brightness','delta_greenness','delta_nbr','delta_wetness', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
-    if make_oob_map or oob_map_metric in inputs:
-        # Check if oob_map params were specified. If not, set to defaults
-        if 'n_tiles' not in inputs:
-            n_tiles = 40, 90
-            print 'n_tiles not specified. Using default: %s x %s ...\n' % (n_tiles)
-            
-        else:
-            n_tiles = int(n_tiles[0]), int(n_tiles[1])
-            
-        print 'Calculating OOB score and making OOB score map...'
-        try:
-            ds = gdal.Open(mosaic_path)
-            ar = ds.ReadAsArray()
-            mask = ar != 0
-            del ar
-            xsize = ds.RasterXSize
-            ysize = ds.RasterYSize
-            tx = ds.GetGeoTransform()
-            prj = ds.GetProjection()
-            driver = ds.GetDriver()
-            ds = None  
-        except:
-            mosaic_ds = ogr.Open(mosaic_path)
-            if 'resolution' not in inputs:
-                warnings.warn('Resolution not specified. Assuming default of 30...\n')
-            mask = mosaic_ds.GetLayer()
-            min_x, max_x, min_y, max_y = mask.GetExtent()
-            ul_x = min_x - ((min_x - snap_coord[0]) % resolution)
-            ul_y = max_y - ((max_y - snap_coord[1]) % resolution)
-            xsize = int((max_x - ul_x)/resolution)
-            ysize = int((ul_y - min_y)/resolution)
-            prj = mask.GetSpatialRef().ExportToWkt()
-            driver = gdal.GetDriverByName('gtiff')
-            x_res = resolution
-            y_res = -resolution
-            tx = ul_x, x_res, 0, ul_y, 0, y_res
-        
-        avg_dict, df_sets = stem.oob_map(ysize, xsize, 0, mask, n_tiles, tx,
-                                     support_size, db_path, df_sets, df_train, target_col,
-                                     predict_cols, out_dir,
-                                     stamp, prj, driver, oob_map_metric)
-        df_sets.to_csv(set_txt, sep='\t')#'''
-
-        avg_oob = round(avg_dict[oob_map_metric], 1)
-        avg_cnt = int(round(avg_dict['count'], 0))
-        
-        print '\nAverage OOB score: .................... %.1f' % avg_oob
-        print '\nAverage number of overlapping sets: ... %s\n' % avg_cnt
-        
-        print 'Time to make OOB score map: %.1f hours\n' % ((time.time() - t1)/3600)
-    
-    # Record params in inventory text file
-    if 'inventory_txt' in inputs:
-        t1 = time.time()
-        print 'Getting model info...\n'
-        df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
-        n_sets = len(df_sets)
-        '''if 'sample' in sample_txt:
-            n_samples = int(sample_txt.split('_')[1].replace('sample',''))
-        inv_columns = df_inv.columns
-        if 'n_sets' in inv_columns: df_inv.ix[stamp, 'n_sets'] = n_sets
-        if 'n_samples' in inv_columns: df_inv.ix[stamp, 'n_samples'] = n_samples
-        if 'support_size' in inv_columns: df_inv.ix[stamp, 'support_size'] = str(support_size)
-        if 'sets_per_cell' in inv_columns: df_inv.ix[stamp, 'sets_per_cell'] = sets_per_cell
-        if 'max_features' in inv_columns: df_inv.ix[stamp, 'max_features'] = max_features
-        info_dir = os.path.dirname(inventory_txt)
-        existing_models = fnmatch.filter(os.listdir(info_dir), '%s*' % target_col)
-        if len(existing_models) > 0:
-            df_inv = df_inv[df_inv.index.isin(existing_models)]#'''
-
-
-        if 'avg_oob' in inv_columns and make_oob_map: df_inv.ix[stamp, 'avg_oob'] = avg_oob
-        if 'avg_count' in inv_columns and make_oob_map: df_inv.ix[stamp, 'avg_count'] = avg_cnt
-        if len(df_inv) > 1:
-            df_inv.to_csv(inventory_txt, sep='\t')
-        else:
-            print 'WARNING: Model info not written to inventory_txt...\n' #'''   
         
     
     print 'Total training time: %.1f minutes' % ((time.time() - t0)/60)
