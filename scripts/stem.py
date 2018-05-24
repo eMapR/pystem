@@ -9,6 +9,7 @@ import sys
 import time
 import fnmatch
 import glob
+import psutil
 import shutil
 import random
 import warnings
@@ -1285,6 +1286,17 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
     ''' make mosaic_path optional and to use on-the-fly tiles'''
     
     t1 = time.time()
+
+    # Check available memory and stall if there's not enough. This is useful
+    #   because there is usually a spike in memory usage right after starting
+    #   the script, but then processes become asynchronized and are not using
+    #   a lot of memory all at once 
+    memory = psutil.virtual_memory()
+    available = memory.available/float(memory.total)
+    while available < .15:
+        time.sleep(5)
+        memory = psutil.virtual_memory()
+        available = memory.available/float(memory.total)
     
     #get un-picklable objects
     mosaic_dataset = ogr.Open(mosaic_path)
