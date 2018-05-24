@@ -79,7 +79,7 @@ class ForkedData(object):
 
 def read_params(txt):
     '''
-    Return a dictionary and a dataframe from parsed parameters in txt
+    Return a dictionary from parsed parameters in txt
     '''
     if not os.path.exists(txt):
         print 'Param file does not exist:\n', txt
@@ -95,23 +95,22 @@ def read_params(txt):
     
     # Set the dictionary key to whatever is left of the ";" and the val
     #   to whatever is to the right. Strip whitespace too.
-    n_skip_lines = 0 #Keep track of the number of lines w/ a ";"
+    n_skip_lines = 0 #Keep track of the number of lines w/o a ";"
     for var in input_vars:
         if len(var) == 2:
             d[var[0].replace(" ", "")] =\
                 '"{0}"'.format(var[1].strip(" ").replace("\n", ""))
             n_skip_lines +=1
     
-    # Get the lines with information about each variable as a df
-    ''' Consider making skip_lines a list of indices rather than a range (maybe search \t)'''
+    '''# Get the lines with information about each variable as a df
     skip_lines = range(len(input_vars) - n_skip_lines, len(input_vars))
     df_vars = pd.read_csv(txt, sep='\t', index_col='var_name', skip_blank_lines=True, skiprows=skip_lines)
     # Drop any rows for which basepath or search str are empty
     df_vars.dropna(inplace=True, subset=['basepath','search_str'])
-    df_vars.fillna({'path_filter': ''}, inplace=True)
+    df_vars.fillna({'path_filter': ''}, inplace=True)'''
     
-    print '\nParameters read from:\n', txt, '\n'
-    return d, df_vars
+    print 'Parameters read from:\n', txt, '\n'
+    return d#, df_vars
 
 
 def vars_to_numbers(cell_size, support_size, sets_per_cell, min_obs, max_features, pct_train):
@@ -651,8 +650,9 @@ def find_file(basepath, search_str, tile_str=None, path_filter=None):
     #import pdb; pdb.set_trace()
     if len(paths) < 1:
         #pdb.set_trace()
-        sys.exit(('No files found for tsa {0} with basepath {1} and ' +\
-        'search_str {2}\n').format(tile_str, basepath, search_str))
+        '''raise IOError(('No files found for tsa {0} with basepath {1} and ' +\
+        'search_str {2}\n').format(tile_str, basepath, search_str))'''
+        return None
     
     return paths[0]
     
@@ -849,6 +849,7 @@ def par_train_estimator(i, n_sets, start_time, df_train, predict_cols, target_co
         connection.executemany(insert_cmd, train_records + oob_records)
         connection.commit()'''
     set_samples = pd.DataFrame(train_records + oob_records, columns=['set_id', 'sample_id', 'in_bag'])
+    set_samples.to_csv(dt_path.replace(dt_path.split('.')[-1], '_sample_ids.txt'), sep='\t')
     
     return support_set, set_samples
 
@@ -1141,6 +1142,8 @@ def get_pixel_predictors(df_var, offset, tile_str, size=(1,1), out_nodata=-9999)
     predictors = []
     for var_name, info in df_var.iterrows():
         file_path = find_file(info.basepath, info.search_str, tile_str, info.path_filter)
+        if file_path is None:
+            return None
         ds = gdal.Open(file_path)
         ar = ds.GetRasterBand(info.data_band).ReadAsArray(offset[1], offset[0], size[1], size[0])
         predictors.append(ar.ravel().astype(np.int16))
@@ -1305,6 +1308,7 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
     tile_ul = ul_x, ul_y
     mask_offset = calc_offset(tile_info[['ul_x','ul_y']], tile_ul, tile_tx)
     
+    # Find all sets that overlap this tile
     feature = mosaic_ds.GetFeature(fid)
     tile_geom = feature.GetGeometryRef()
     t1 = time.time()
@@ -1312,6 +1316,9 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
     del tile_geom, feature
     
     nrows, ncols = tile_size
+    # Support sets are tracked with a unique ID (index of support set df), and
+    #   these IDs will be used to determine unique combinations of support sets.
+    #   IDs are likely not continuous, so the n_supports likely != max(index)
     if overlapping_sets.index.max() < 65355: # max val for unsigned 16-bit int
         stack_nodata = 65355
         np_dtype = np.uint16
@@ -1319,7 +1326,7 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
         stack_nodata = -1
         np_dtype = np.int32
     stack_shape = (nrows, ncols, len(overlapping_sets))
-    set_stack = np.full(stack_shape, stack_nodata, dtype=np_dtype)
+    set_stack = np.full(stack_shape, stack_nodata, dtype=np_dtype)# create empy array
     t2 = time.time()
     for i, (set_id, set_info) in enumerate(overlapping_sets.iterrows()):
         # load estimators
@@ -1330,10 +1337,14 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
             overlapping_sets.ix[set_id, 'dt_model'] = joblib.load(overlapping_sets.ix[set_id, 'dt_file'])
         offset = calc_offset(tile_ul, set_info[['ul_x', 'ul_y']], tile_tx)
         t_inds, s_inds = mosaic_by_tsa.get_offset_array_indices(tile_size, support_size, offset)
+        # fill in just the portion of this band in the stack where the set overlaps
         set_stack[t_inds[0]:t_inds[1], t_inds[2]:t_inds[3], i] = set_id
     set_stack = set_stack[mask]
     
+    # Get an array of predictors. Each row is a pixel and each column is a predictor
     predictors = get_pixel_predictors(df_var, mask_offset, tile_str, tile_size)
+    if not isinstance(predictors, np.ndarray): # One of the predictors couldn't be found
+        return None
     n_pixels, n_predictors = predictors.shape      
     
     # find unique combos of support sets
@@ -1366,14 +1377,15 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
                 most_important, _ = zip(*[get_max_importance(e) for e in estimators])
             stats['importance'] = np.uint8(mode(most_important))
         dfs.append(stats)
-        
-    predictions = pd.concat(dfs).sort_index()#.round()
+    
+    # Combine all stats so that each column in df is an agg_stat and each row
+    #   is a pixel
+    predictions = pd.concat(dfs).sort_index()# sorting puts them back in the right order 
     del dfs, predictors
     
     n_predictions = len(predictions)
     this_template = path_template.format(tile_id=tile_str)
-    for stat, values in predictions.iteritems():
-        #try:
+    for stat, values in predictions.iteritems(): #iterate over columns
         if stat == 'stdv':
             this_nodata = -9999
         else:
@@ -1383,10 +1395,8 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
         this_path = this_template % {'stat': stat}
         mosaic_by_tsa.array_to_raster(ar, tile_tx, prj, driver, this_path, nodata=this_nodata, silent=True)
         predictions.loc[mask.size, stat] = this_nodata # add nodata val to get max/min later
-            #import pdb; pdb.set_trace()
-        #except Exception as e:
-        #   import pdb; pdb.set_trace()
     
+    # Get range for each stat to determine min numpy dtype in main prediction script
     mins = predictions.min(axis=0)
     maxs = predictions.max(axis=0)
     
@@ -1564,14 +1574,14 @@ def get_tiles(n_tiles, xsize, ysize, tx=None):
 
 
 def get_overlapping_sets(support_sets, geometry):
-    
+
     overlapping = []
     for set_id, row in support_sets.iterrows():
         
         wkt = 'POLYGON (({0} {1}, {2} {1}, {2} {3}, {0} {3}, {0} {1}))'.format(row.ul_x, row.ul_y, row.lr_x, row.lr_y)
         set_geom = ogr.CreateGeometryFromWkt(wkt)
         set_geom.CloseRings()
-        
+
         # Can't just use ,Intersects() because if support set touches the boundary,
         #   .Intersects() returns True
         if set_geom.Intersection(geometry).GetArea() > 0:
@@ -1720,17 +1730,38 @@ def find_empty_tiles(df, nodata_mask, tx, nodata=None, val_field=None):
     
     empty = []
     
-    for i, coords in df.iterrows():
-        ul_r, ul_c = calc_offset((tx[0], tx[3]), coords[['ul_x', 'ul_y']], tx)
-        lr_r, lr_c = calc_offset((tx[0], tx[3]), coords[['lr_x', 'lr_y']], tx)
-        if type(nodata_mask) == ogr.Layer:
-            this_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, coords, tx, nodata, val_field)
-            this_mask = this_mask != nodata
-        else:
-            this_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
+    if type(nodata_mask) == ogr.Layer:
         
-        if not this_mask.any():
-            empty.append(i)
+        if nodata_mask.GetFeatureCount() > 1:
+            ''' This makes produces and empty geometry for some reason'''
+            mosaic_geom = ogr.Geometry(ogr.wkbMultiPolygon)
+            for feature in nodata_mask:
+                g = feature.GetGeometryRef()
+                # Check that the feature is valid. Clipping can produce a feautre
+                #  w/ an area of 0
+                if g.GetArea() > 1:
+                    mosaic_geom.AddGeometry(g)
+            geom = mosaic_geom.UnionCascaded()
+        else:
+            feature = nodata_mask.GetFeature(0)
+            geom = feature.GetGeometryRef()
+        full_tiles = get_overlapping_sets(df, geom)
+        empty = df.index[~df.index.isin(full_tiles.index)]
+        feature, geom = None, None
+        
+    else:    
+        for i, coords in df.iterrows():
+            ul_r, ul_c = calc_offset((tx[0], tx[3]), coords[['ul_x', 'ul_y']], tx)
+            lr_r, lr_c = calc_offset((tx[0], tx[3]), coords[['lr_x', 'lr_y']], tx)
+            if type(nodata_mask) == ogr.Layer:
+                this_mask, _ = mosaic_by_tsa.kernel_from_shp(nodata_mask, coords, tx, nodata, val_field)
+                this_mask = this_mask != nodata
+            else:
+                this_mask = nodata_mask[ul_r : lr_r, ul_c : lr_c]
+            
+            if not this_mask.any():
+                empty.append(i)#'''
+
     
     return empty
 
