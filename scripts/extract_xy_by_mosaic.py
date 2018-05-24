@@ -649,7 +649,10 @@ def main(params, out_dir=None, xy_txt=None, kernel=False, resolution=30, tile_id
                 df_yr[this_df.columns] = this_df
         
         # Write df_var with all years for this predictor to txt file
-        df_xy[df_vars.index.tolist()] = df_yr[df_vars.index.tolist()]
+        if n_years > 1:
+            df_xy[[col + '_' + str(year) for col in df_vars.index.tolist()]] = df_yr[df_vars.index.tolist()]
+        else:
+            df_xy[df_vars.index.tolist()] = df_yr[df_vars.index.tolist()]
         if kernel:
             this_bn = '%s_%s_kernelstats.txt' % (xy_txt_bn[:-4], year)
             this_txt = os.path.join(out_dir, this_bn)
