@@ -98,6 +98,9 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             shutil.copy2(confusion_params, out_dir)
         confusion_params = new_conf_path
     
+    if overwrite_tiles.lower() == 'false':
+        overwrite_tiles = False
+    
     if not os.path.exists(model_dir):
         sys.exit('model_dir does not exist:\n%s' % model_dir)
     if not os.path.exists(mosaic_path):
@@ -168,7 +171,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
         driver = mosaic_ds.GetDriver()
         m_ulx, x_res, x_rot, m_uly, y_rot, y_res = mosaic_tx
     #driver = gdal.GetDriverByName('gtiff')
-        
+    
     # If number of tiles not given, need to set it
     if 'n_tiles' not in inputs:
         print 'n_tiles not specified. Using default: 25 x 15 ...\n'
@@ -201,7 +204,7 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
                 import pdb; pdb.set_trace()
         index_field = tiles.index.name
         tiles[index_field] = tiles.index
-        tiles = tiles.set_index(tile_id_field, drop=False)[tile_files.isnull().any(axis=1)]
+        tiles = tiles.set_index(tile_id_field, drop=False)
         tiles.set_index(index_field, inplace=True)#'''
     tiles['ul_x'] = [stem.get_ul_coord(xmin, xmax, x_res) 
                     for i, (xmin, xmax) in tiles[['xmin','xmax']].iterrows()]
@@ -214,10 +217,9 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     
     support_nrows = int(support_size[0]/abs(y_res))
     support_ncols = int(support_size[1]/abs(x_res))
-    t1 = time.time()
-    #args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles[tiles['name'].isin(['1092', '3224'])].iterrows())]    
-    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.iterrows())]
-    
+    t1 = time.time()   
+    args = [(i + 1, n_tiles, t1, tile_info, mosaic_path, mosaic_tx, df_sets, df_var, (support_nrows, support_ncols), agg_stats, tile_path_template, prj, nodata, snap_coord) for i, (t_ind, tile_info) in enumerate(tiles.loc[tile_files.isnull().any(axis=1).values].iterrows())]
+
     if n_jobs > 1:
         print 'Predicting with %s jobs...\n' % n_jobs
         pool = Pool(n_jobs)
@@ -231,22 +233,32 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
             limits.append(stem.par_predict_tile(arg))#'''
     print '\n\nFinished predicting in %.1f hours. \n\nStitching tiles...' % ((time.time() - t1)/3600)
 
-    limits = pd.concat(limits)
+    try:
+        limits = pd.concat(limits)
+    except:
+        # They're all None
+        pass
+    
     t1 = time.time()
     mosaic_ul = mosaic_tx[0], mosaic_tx[3]
     driver = gdal.GetDriverByName('gtiff')
     for stat in agg_stats:
-        dtype = mosaic.get_min_numpy_dtype(limits[stat])
+        #dtype = mosaic.get_min_numpy_dtype(limits[stat])
+        dtype = np.uint8
         if stat == 'stdv':
             this_nodata = -9999
-            ar = np.full((ysize, xsize), this_nodata, dtype=dtype) 
+            ar = np.full((ysize, xsize), this_nodata, dtype=np.int16)#dtype) 
         else:
             this_nodata = nodata
             ar = np.full((ysize, xsize), this_nodata, dtype=dtype)
         
         for tile_id, tile_coords in tiles.iterrows():
             tile_file = os.path.join(tile_dir, 'tile_%s_%s.tif' % (tile_coords[tile_id_field], stat))
-            ds = gdal.Open(tile_file)
+            try:
+                ds = gdal.Open(tile_file)
+            except:
+                print 'Tile not found'
+                continue
             tile_tx = ds.GetGeoTransform()
             tile_ul = tile_tx[0], tile_tx[3]
             row_off, col_off = stem.calc_offset(mosaic_ul, tile_ul, mosaic_tx)
@@ -298,64 +310,6 @@ def main(params, inventory_txt=None, constant_vars=None, mosaic_shp=None, resolu
     importance['rank'] = [int(r) for r in importance.pct_importance.rank(method='first', ascending=False)]
     out_txt = os.path.join(out_dir, '%s_importance.txt' % file_stamp)
     importance.to_csv(out_txt, sep='\t')#'''
-    
-    if 'confusion_params' in locals():
-        import confusion_matrix as confusion
-
-        ''' 
-         Read the mean or vote back in '''
-        if 'vote' in agg_stats:
-            vote_path = os.path.join(out_dir, '%s_vote.tif' % file_stamp)
-            ar_vote = gdal.Open(vote_path)
-            print '\nComputing confusion matrix for vote...'
-            vote_dir = os.path.join(model_dir, 'evaluation_vote')
-            out_txt = os.path.join(vote_dir, 'confusion.txt')
-            df_v = confusion.main(confusion_params, ar_vote, out_txt, match=True)
-            vote_acc = df_v.ix['producer', 'user']
-            vote_kap = df_v.ix['producer', 'kappa']
-            '''try:
-                out_txt = os.path.join(vote_dir, 'confusion_avg_kernel.txt')
-                df_v_off = confusion.main(confusion_params, ar_vote, out_txt)
-            except Exception as e:
-                print e'''
-
-                
-        if 'mean' in agg_stats:
-            mean_path = os.path.join(out_dir, '%s_mean.tif' % file_stamp)
-            ar_mean = gdal.Open(mean_path)
-            print '\nGetting confusion matrix for mean...'
-            mean_dir = os.path.join(model_dir, 'evaluation_mean')
-            out_txt = os.path.join(mean_dir, 'confusion.txt')
-            df_m = confusion.main(confusion_params, ar_mean, out_txt, match=True)
-            mean_acc = df_m.ix['user','producer']
-            mean_kap = df_m.ix['user', 'kappa']
-            '''try:
-                out_txt = os.path.join(mean_dir, 'confusion_avg_kernel.txt')
-                df_m_off = confusion.main(confusion_params, ar_mean, out_txt)
-            except Exception as e:
-                print e#'''
-
-
-        if 'inventory_txt' in inputs:
-            df_inv = pd.read_csv(inventory_txt, sep='\t', index_col='stamp')
-            cols = ['vote_accuracy', 'vote_kappa']#, 'vote_mask', 'mean_accuracy', 'mean_kappa', 'vote_mask']
-            df_inv.ix[file_stamp, cols] = vote_acc, vote_kap#, False, mean_acc, mean_kap, False
-            df_inv.to_csv(inventory_txt, sep='\t')
-        else:
-            print '\n"inventory_txt" was not specified.' +\
-            ' Model evaluation scores will not be recorded...'
-            
-        print ''
-        if 'vote' in agg_stats:
-            print 'Vote accuracy .............. ', vote_acc
-            print 'Vote kappa ................. ', vote_kap
-        if 'mean' in agg_stats:
-            print 'Mean accuracy .............. ', mean_acc
-            print 'Mean kappa ................. ', mean_kap
-        
-    else:
-        print '\n"confusion_params" was not specified.' +\
-            ' This model will not be evaluated...' #'''
     
     print '\nTotal prediction runtime: %.1f hours\n' % ((time.time() - t0)/3600)
 
