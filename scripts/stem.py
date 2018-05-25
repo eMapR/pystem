@@ -1302,7 +1302,11 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
     mosaic_dataset = ogr.Open(mosaic_path)
     mosaic_ds = mosaic_dataset.GetLayer()
     agg_dict = get_agg_dict()
-    agg_stats = agg_dict[agg_stats]
+    # Handle agg_stats that might only contain oob or importance predictors
+    if agg_dict.index.isin(agg_stats).any():
+        agg_stats = agg_dict[agg_stats]
+    else:
+        agg_stats = pd.Series({s: 1 for s in agg_stats})# make a dummy series
     driver = gdal.GetDriverByName('gtiff')
         
     tile_str = tile_info[tile_id_field]
@@ -1381,7 +1385,7 @@ def predict_tile(tile_info, mosaic_path, mosaic_tx, df_sets, df_var, support_siz
                                agg_stats, these_pxl_ids)
         for s in oob_stats:
             if s in df_sets.columns:
-                stats[s] = np.uint8(round(overlapping_sets[s].mean()))
+                stats[s] = np.uint8(round(overlapping_sets.loc[set_inds, s].mean()))
         if 'importance' in agg_stats.index:
             if importance_cols:
                 most_important = np.argmax(overlapping_sets.ix[set_inds, importance_cols].values, axis=1)
