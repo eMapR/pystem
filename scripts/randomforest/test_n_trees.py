@@ -9,20 +9,27 @@ from matplotlib import style
 from datetime import datetime
 
 import randomforest as forest
-  
 
-def test(out_dir, x_train, y_train, max_trees, step, min_trees=10):
+import warnings
+warnings.filterwarnings("ignore")
+
+
+def test(out_dir, x_train, y_train, max_trees, step, min_trees=None, silent=False):
     ''' Make a plot for sample_txt of number of trees vs OOB error rates '''
 
-    print 'Testing OOB error rate per number of trees...'
+    if not silent: print 'Testing OOB error rate per number of trees...'
+    
     oob_errors = []
+    if not min_trees:
+        min_trees = step
     n_trees = range(min_trees, max_trees + 1, step)
     n_tests = len(n_trees)
 
     for i, n in enumerate(n_trees):
-        rf_model = forest.train_rf_regressor(x_train, y_train, ntrees=n)
+        rf_model = forest.train_rf_regressor(x_train, y_train, ntrees=n, njobs=1)
         oob_errors.append(1 - rf_model.oob_score_)
-        print 'Testing %s of %s models with %s trees: %.3f' % (i + 1, n_tests, n, rf_model.oob_score_)
+        if not silent:
+            print 'Testing %s of %s models with %s trees: %.3f' % (i + 1, n_tests, n, rf_model.oob_score_)
 
     plt.plot(n_trees, oob_errors, '-')
     plt.axis([0, max_trees, 0, 1])
@@ -33,13 +40,15 @@ def test(out_dir, x_train, y_train, max_trees, step, min_trees=10):
     plt.savefig(out_png)
     plt.clf()
 
-    print 'Plot PNG written to : ', out_png, '\n'
+    if not silent: print 'Plot PNG written to : ', out_png, '\n'
+    
+    return [n_trees, oob_errors]
 
 
-def main(params, constant_vars=[]):
+def main(params, constant_vars=[], silent=False, return_results=True):
 
     # Read params and make variables from text
-    inputs = forest.read_params(params)
+    inputs = forest.read_params(params, silent=silent)
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])
 
@@ -54,7 +63,7 @@ def main(params, constant_vars=[]):
         msg = "Variable '%s' not specified in param file:\n%s" % (missing_var, params)
         raise NameError(msg)
 
-    # Raise an error if var_txt doesn't exist. Otherwise, just read it in
+    # Try to read var_txt
     if not os.path.exists(var_txt):
         print ''
         msg = 'var_text path specified does not exist:\n%s\n\n' % var_txt
@@ -72,8 +81,11 @@ def main(params, constant_vars=[]):
     
     
     out_dir = os.path.dirname(sample_txt)
-    test(out_dir, x_train, y_train, max_trees, step)
+    scores = test(out_dir, x_train, y_train, max_trees, step, silent=silent)
     shutil.copy2(var_txt, out_dir)
+    
+    if return_results:
+        return scores
 
 
 if __name__ == '__main__':

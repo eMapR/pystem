@@ -1,0 +1,14 @@
+var_name	data_band	search_str	basepath	by_tile	path_filter
+elevation	1	*ned_dem_ee_conus_20170501_elevation.bsq	/vol/v2/conus_tiles/tiles_topo	1
+slope	1	*ned_dem_ee_conus_20170501_slope.bsq	/vol/v2/conus_tiles/tiles_topo	1
+aspectNESW	1	*ned_dem_ee_conus_20170501_aspect_nesw.bsq	/vol/v2/conus_tiles/tiles_topo	1
+aspectNWSE	1	*ned_dem_ee_conus_20170501_aspect_nwse.bsq	/vol/v2/conus_tiles/tiles_topo	1
+greenness	18	*lt_ee_conus_nbr_20170417_ftv_tcg.bsq	/vol/v2/conus_tiles/tiles_seg	1
+brightness	18	*lt_ee_conus_nbr_20170417_ftv_tcb.bsq	/vol/v2/conus_tiles/tiles_seg	1
+wetness	18	*lt_ee_conus_nbr_20170417_ftv_tcw.bsq	/vol/v2/conus_tiles/tiles_seg	1
+nbr	18	*lt_ee_conus_nbr_20170417_ftv_nbr.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_greenness	18	*lt_ee_conus_nbr_20170417_delta_tcg.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_brightness	18	*lt_ee_conus_nbr_20170417_delta_tcb.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_wetness	18	*lt_ee_conus_nbr_20170417_delta_tcw.bsq	/vol/v2/conus_tiles/tiles_seg	1
+delta_nbr	18	*lt_ee_conus_nbr_20170417_delta_nbr.bsq	/vol/v2/conus_tiles/tiles_seg	1
+time_since	18	*lt_ee_conus_nbr_20170417_time_since.bsq	/vol/v2/conus_tiles/tiles_seg	1

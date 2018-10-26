@@ -1,7 +1,7 @@
 Paramater File for train_rf_regressor.py
 
 target_col; canopy
-sample_txt; /vol/v2/stem/canopy/samples/canopy_sample1454542_20161017_1919/canopy_sample1454542_20161017_1919_predictors.txt
+sample_txt; /vol/v2/stem/canopy/samples/canopy_sample1454542_20161017_1919/canopy_sample1454542_20161017_1919_predictors_no0inflation.txt
 var_txt; /vol/v2/stem/stem-git/param_files/test_n_trees_vartext.txt
 out_dir; /vol/v2/stem/canopy/models
 

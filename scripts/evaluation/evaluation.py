@@ -53,14 +53,14 @@ def get_overlapping_polys(src_shp, ovr_shp, out_shp):
     '''
     ds_src = ogr.Open(src_shp)
     if ds_src == None:
-        print 'Shapefile does not exist or is not valid:\n%s' % src_shp
+        print('Shapefile does not exist or is not valid:\n%s' % src_shp)
         return None
     lyr_src = ds_src.GetLayer()
     srs_src = lyr_src.GetSpatialRef()
     
     ds_ovr = ogr.Open(ovr_shp)
     if ds_ovr == None:
-        print 'Shapefile does not exist or is not valid:\n%s' % ovr_shp
+        print('Shapefile does not exist or is not valid:\n%s' % ovr_shp)
         return None
     lyr_ovr = ds_ovr.GetLayer()
     
@@ -78,7 +78,7 @@ def get_overlapping_polys(src_shp, ovr_shp, out_shp):
         field_def = lyr_src_def.GetFieldDefn(i)
         lyr_out.CreateField(field_def) 
     
-    print 'Finding overlapping features...'
+    print('Finding overlapping features...')
     t0 = time.time()
     # Loop through each feautre and check for overlap
     #for i in xrange(lyr_src.GetFeatureCount()):
@@ -110,14 +110,14 @@ def get_overlapping_polys(src_shp, ovr_shp, out_shp):
         feat_src.Destroy()
         feat_src = lyr_src.GetNextFeature()
     
-    print 'Total time: %.1f\n' % (time.time() - t0)
+    print('Total time: %.1f\n' % (time.time() - t0))
     
     ds_src.Destroy()
     ds_ovr.Destroy()
     lyr_src = None
     lyr_ovr = None
     
-    print 'Shapefile written to: ', out_shp     
+    print('Shapefile written to: ', out_shp)    
 
 
 def feature_to_mask(feat, x_res, y_res):
@@ -284,8 +284,8 @@ def df_to_shp(df, in_shp, out_path, copy_fields=True):
             attribute table of the output shapefile
     '''
     if 'fid' not in [c.lower() for c in df.columns]:
-        print 'Warning: no FID column found in dataframe. Using index of'+\
-        ' dataframe instead'
+        print('Warning: no FID column found in dataframe. Using index of'+\
+        ' dataframe instead')
         df['fid'] = df.index
     df.set_index('fid', drop=True, inplace=True)
          
@@ -298,7 +298,7 @@ def df_to_shp(df, in_shp, out_path, copy_fields=True):
     # Make new shapefile and datasource, and then a layer from the datasource
     driver = ogr.GetDriverByName('ESRI Shapefile')
     try: ds_out = driver.CreateDataSource(out_path)
-    except: print 'Could not create shapefile with out_path: \n', out_path
+    except: print('Could not create shapefile with out_path: \n', out_path)
     lyr = ds_out.CreateLayer(os.path.basename(out_path)[:-4], srs, geom_type=lyr_in.GetGeomType())
     
     # Copy the schema of ds_in
@@ -345,7 +345,7 @@ def df_to_shp(df, in_shp, out_path, copy_fields=True):
     with open(prj_file, 'w') as prj:
         prj.write(srs.ExportToWkt()) 
     
-    print 'Shapefile written to: \n', out_path
+    print('Shapefile written to: \n', out_path)
 
 
 def scatter_plot(x, y, xlab, ylab, out_dir):
@@ -382,7 +382,7 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
     del ar_buf
     
     if 'best' in match:
-        print 'Finding best match for each sample in a 3 x 3 kernel...'
+        print('Finding best match for each sample in a 3 x 3 kernel...')
         p_samples = ar_p[samples.row, samples.col]
         sample_mask = p_samples != p_nodata
         p_samples = p_samples[sample_mask]
@@ -403,9 +403,9 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
         t_samples = t_samples[sample_mask]
         p_samples = p_samples[sample_mask]
         
-        print 'Time to get samples: %.1f seconds\n' % (time.time() - t0)
+        print('Time to get samples: %.1f seconds\n' % (time.time() - t0))
     else:
-        print 'Getting average prediction sample vals for 3 x 3 kernel... '
+        print('Getting average prediction sample vals for 3 x 3 kernel... ')
         test_stats = pd.DataFrame(calc_row_stats(p_kernel, 'continuous', 'value', p_nodata))
         sample_mask = ~test_stats.value.isnull().values # Where value is not null
         p_samples = test_stats.value.values # Get values as np array
@@ -414,7 +414,7 @@ def get_samples(ar_p, ar_t, p_nodata, t_nodata, samples=None, match='best_match'
         
         test_stats = pd.DataFrame(calc_row_stats(t_kernel, 'continuous', 'value', t_nodata))
         t_samples = test_stats.value.values[sample_mask].astype(np.int32)
-        print 'Time to get samples: %.1f seconds\n' % (time.time() - t0)#'''
+        print('Time to get samples: %.1f seconds\n' % (time.time() - t0))#'''
     
     return t_samples, p_samples
 
@@ -424,7 +424,7 @@ def area_weighted_rmse(ar_p, ar_t, p_sample, t_sample, bins, p_nodata, out_txt=N
     scores = []
     size = float(ar_p[ar_p != p_nodata].size)
     for i, (l, u) in enumerate(bins):
-        print 'Calculating RMSE for reference class from %s to %s' % (l, u)
+        print('Calculating RMSE for reference class from %s to %s' % (l, u))
         label = '%s_%s' % (l, u)
         t_mask = (t_sample <= u) & (t_sample > l)
         x = t_sample[t_mask]
@@ -488,7 +488,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     empty_bins = []
     for i, (l, u) in enumerate(bins):
         if not silent:
-            print 'Getting counts for reference class from %s to %s' % (l, u)
+            print('Getting counts for reference class from %s to %s' % (l, u))
         t2 = time.time() 
         t_mask = (t_samples <= u) & (t_samples > l)# Create a mask of bin values from target
         p_mask = (p_samples <= u) & (p_samples > l)
@@ -499,7 +499,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
             total_counts[label] = 0
             empty_bins.append(label)
             if not silent:
-                print 'No samples found in prediction raster betwen %s and %s...\n' % (l, u)
+                print('No samples found in prediction raster betwen %s and %s...\n' % (l, u))
             continue#'''
             
         counts = []
@@ -521,7 +521,7 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
             total_counts[label] = total_count
         
         if not silent:
-            print 'Time for this class: %.1f seconds\n' % (time.time() - t2)
+            print('Time for this class: %.1f seconds\n' % (time.time() - t2))
     
     #import pdb; pdb.set_trace()
     df = pd.DataFrame(cols)#, columns=labels + ['n_samples', 'total'])
@@ -607,10 +607,10 @@ def confusion_matrix_by_area(ar_p, ar_t, samples, p_nodata, t_nodata, mask=None,
     if out_txt:
         df_smp.to_csv(out_txt.replace('.txt', '_sample.txt'), sep='\t')
         df.to_csv(out_txt.replace('.txt', '_proportion.txt'), sep='\t')
-        if not silent: print '\nDataframe written to: ', out_txt
+        if not silent: print('\nDataframe written to: ', out_txt)
         
     
-    if not silent: print '\nTotal time: %.1f minutes' % ((time.time() - t0)/60)
+    if not silent: print('\nTotal time: %.1f minutes' % ((time.time() - t0)/60))
     return df, df_smp#"""
 
 
@@ -728,14 +728,14 @@ def confidence_interval(class_totals, map_totals, pct_areas, class_accuracy, z_s
         
 
 def histogram_2d(t_samples, p_samples, out_png, bins=50, title=None, cmap=matplotlib.cm.gray, hexplot=False, vmax=None):
-    print 'Plotting 2D histogram...'
+    print('Plotting 2D histogram...')
     t0 = time.time()
     clip = False
     if vmax:
         clip = True
     if hexplot:
         if type(bins) != int: 
-            print 'WARNING: bins given is not an integer, setting to default 100 equally sized bins...'
+            print('WARNING: bins given is not an integer, setting to default 100 equally sized bins...')
             bins=50
         plt.hexbin(t_samples, p_samples, gridsize=bins, norm=LogNorm(vmax=vmax, clip=clip), cmap=cmap)
     else:
@@ -748,12 +748,12 @@ def histogram_2d(t_samples, p_samples, out_png, bins=50, title=None, cmap=matplo
     #fig_path = os.path.join(pxl_scale_dir, title)
     plt.savefig(out_png, dpi=300)
     plt.clf()
-    print '%.1f seconds\n' % (time.time() - t0)
+    print('%.1f seconds\n' % (time.time() - t0))
 
 
 def plot_agreement(df, out_png, sys_color='cyan', unsys_color='magenta', class_labels=None, xlabel='Land Cover Class', ylabel='Agreement Coefficient'):
     
-    print 'Plotting stats...'
+    print('Plotting stats...')
     width = .25
     x_loc = np.arange(len(df)) + width
     bar_s = plt.bar(x_loc - width, df.AC_sys, width, color=sys_color, alpha=.5, edgecolor='none', label='Systematic')
@@ -776,19 +776,19 @@ def plot_agreement(df, out_png, sys_color='cyan', unsys_color='magenta', class_l
     
     plt.savefig(out_png)
     plt.clf()
-    print 'Plot saved to ', out_png
+    print('Plot saved to ', out_png)
 
 
 def evaluate_by_lc(ar_p, ar_t, ar_lc, mask, nodata_lc, out_dir):
     '''
     Return a dataframe of the agreement between ar_p and ar_t by class in ar_lc. 
     '''
-    print 'Getting unique values...'
+    print('Getting unique values...')
     classes = np.unique(ar_lc[(ar_lc != nodata_lc) & (ar_lc != 0)]) # Take 0's out too
     #import pdb; pdb.set_trace()
     stats = []
     for lc in classes:
-        print 'Calculating statistics for class ', lc
+        print('Calculating statistics for class ', lc)
         this_mask = (ar_lc == lc) & mask
         this_t = ar_t[this_mask]
         this_p = ar_p[this_mask]
@@ -817,7 +817,7 @@ def plot_bin_agreement(ar_pred, ar_targ, nodata_t, out_dir):
     
     bin_stats = []
     for lower, upper in lims:
-        print 'Calculating stats for %s to %s' % (lower, upper) 
+        print('Calculating stats for %s to %s' % (lower, upper))
         mask = (ar_targ > lower) & (ar_targ <= upper) & (ar_pred > lower) & (ar_pred <= upper)
         this_t = ar_targ[mask]
         this_p = ar_pred[mask]
@@ -848,7 +848,7 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
     nonforest = ar_m == 1
     ar_m = None
     
-    print '\nReading in raster data...\n'
+    print('\nReading in raster data...\n')
     ds_p = gdal.Open(pred_path)
     ar_p = ds_p.ReadAsArray()
     tx   = ds_p.GetGeoTransform()
@@ -866,16 +866,16 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
     ds_stdv = gdal.Open(stdv_path)
     ar_stdv = ds_stdv.ReadAsArray()
     
-    print 'Getting difference map...'
+    print('Getting difference map...')
     t0 = time.time()
     ar_diff, nans = get_dif_map(ar_p, ar_t, nodata_p, nodata_t)
     ras_ext = pred_path.split('.')[-1]
     dif_path = os.path.join(pxl_scale_dir, 'prediction_minus_target.' + ras_ext)
     mosaic.array_to_raster(ar_diff, tx, prj, driver, dif_path, GDT_Int32, nodata_p)
-    print '%.1f seconds\n' % (time.time() - t0)
+    print('%.1f seconds\n' % (time.time() - t0))
     
     shps = find_files(search_dir, search_str, eval_scales)
-    print 'Calculating stats and plotting for all evaluation scales...'
+    print('Calculating stats and plotting for all evaluation scales...')
     for eval_scale, zone_shp in shps:
         
         #If clip_shp is specified, assume that zone shape is unclipped and clip it
@@ -890,27 +890,27 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
         if not os.path.exists(scale_dir): 
             os.mkdir(scale_dir)   
             
-        print 'Getting zonal stats for %s scale...' % eval_scale
+        print('Getting zonal stats for %s scale...' % eval_scale)
         t0 = time.time()
         df_stats = zonal_stats(ar_p, ar_t, ar_diff, ar_stdv, zone_shp, tx, nodata_p, nodata_t)
         out_txt = os.path.join(scale_dir, 'zonal_stats_%s.txt' % eval_scale)
         df_stats.to_csv(out_txt, sep='\t', index=False)
-        print '%.1f seconds\n' % (time.time() - t0)
+        print('%.1f seconds\n' % (time.time() - t0))
         
-        print 'Writing stats to shp...'
+        print('Writing stats to shp...')
         t0 = time.time()
         out_shp = os.path.join(scale_dir, 'zonal_stats_%s.shp' % eval_scale)
         df_to_shp(df_stats, zone_shp, out_shp, copy_fields=False)
-        print '%.1f seconds\n' % (time.time() - t0)
+        print('%.1f seconds\n' % (time.time() - t0))
         
-        print 'Making scatter plot for %s scale...' % eval_scale
+        print('Making scatter plot for %s scale...' % eval_scale)
         t0 = time.time()
         plt.scatter(df_stats.targ_mean, df_stats.pred_mean, alpha=.05)
         plt.xlabel('Target')
         plt.ylabel('Prediction')
         scatter_path = os.path.join(scale_dir, 'scatter_%s.png' % eval_scale)
         plt.savefig(scatter_path)
-        print '%.1f seconds\n' % (time.time() - t0)
+        print('%.1f seconds\n' % (time.time() - t0))
     
     ar_stdv = None
     ds_stdv = None
@@ -918,7 +918,7 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
 
     ar_t_data = ar_t[~nans] 
     ar_p_data = ar_p[~nans]    
-    print 'Plotting scatter of the 2 maps...'
+    print('Plotting scatter of the 2 maps...')
     t0 = time.time()
 
     inds = random.sample(xrange(len(ar_t_data)), 100000)
@@ -930,10 +930,10 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
     fig_path = os.path.join(pxl_scale_dir, 'prediction_vs_target_scatter_no0.png')
     plt.savefig(fig_path)
     plt.clf()
-    print '%.1f seconds\n' % (time.time() - t0)
+    print('%.1f seconds\n' % (time.time() - t0))
         
     # Create 2D histograms
-    print 'Plotting 2D histogram...'
+    print('Plotting 2D histogram...')
     t0 = time.time()
     plt.hist2d(ar_t_data, ar_p_data, bins=50, norm=LogNorm())
     plt.xlabel(os.path.basename(targ_path))
@@ -942,27 +942,27 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
     fig_path = os.path.join(pxl_scale_dir, 'prediction_vs_target_2Dhistogram_no0.png')
     plt.savefig(fig_path)
     plt.clf()
-    print '%.1f seconds\n' % (time.time() - t0)
+    print('%.1f seconds\n' % (time.time() - t0))
     
-    print 'Evaluating by land cover class...'
+    print('Evaluating by land cover class...')
     t0 = time.time()
     ds_lc = gdal.Open(lc_path)
     ar_lc = ds_lc.ReadAsArray()
     df_lc = evaluate_by_lc(ar_p, ar_t, ar_lc, ~nans, nodata_lc, pxl_scale_dir)
-    print '%.1f seconds\n' % (time.time() - t0)
+    print('%.1f seconds\n' % (time.time() - t0))
     
-    print 'Plotting bin stats...'
+    print('Plotting bin stats...')
     t0 = time.time()
     plot_bin_agreement(ar_p_data, ar_t_data, nodata_t, pxl_scale_dir)
-    print '%.1f seconds\n' % (time.time() - t0)#'''
+    print('%.1f seconds\n' % (time.time() - t0))#'''
     
-    print 'Calculating confusion matrix...'
+    print('Calculating confusion matrix...')
     t0 = time.time()
     out_txt = os.path.join(pxl_scale_dir, 'confusion_matrix.txt')
     ar_t_samples = ar_t_data[inds]
     ar_p_samples = ar_p_data[inds]
     confusion_matrix(ar_p_samples, ar_t_samples, out_txt=out_txt)
-    print '%.1f seconds\n' % (time.time() - t0)
+    print('%.1f seconds\n' % (time.time() - t0))
     
     ds_p = None
     ds_t = None
@@ -971,7 +971,7 @@ def main(pred_path, targ_path, lc_path, mask_path, nodata_p, nodata_t, nodata_lc
     ar_t = None
     ar_lc = None
     
-    print 'Outputs written to ', out_dir
+    print('Outputs written to ', out_dir)
 
 '''if __name__ == '__main__':
      params = sys.argv[1]

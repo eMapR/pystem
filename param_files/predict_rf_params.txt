@@ -1,12 +1,13 @@
 
 Paramater File for predict_rf.py
 
-train_params; /vol/v2/stem/canopy/models/canopy_rf_20170517_1507/train_rf_regressor_params.txt
-var_txt; /vol/v2/stem/stem-git/param_files/test_n_trees_vartext.txt
-mask_path; /vol/v1/general_files/datasets/spatial_data/CAORWA_TSA_lt_only.bsq
+train_params; /vol/v1/proj/stem_improv_paper/test_regions/region_09/landcover_20171106_1457/train_rf_params.txt
+var_txt; /vol/v1/proj/stem_improv_paper/scripts/param_files/varinfo_multidate.txt
+mask_path; /vol/v1/proj/stem_improv_paper/test_regions/region_09/tile_09.tif
 nodata; 255
-rf_path; /vol/v2/stem/canopy/models/canopy_rf_20170517_1507/regressor_model_canopy_rf_20170517_1507
-out_dir; /vol/v2/stem/canopy/models/canopy_rf_20170517_1507
+rf_path; /vol/v1/proj/stem_improv_paper/test_regions/region_09/landcover_20171106_1457/rf_model_landcover_20171106_1457.pkl
+out_dir; /vol/v1/proj/stem_improv_paper/test_regions/region_09/landcover_20171106_1457
 
 Optional parameters
-n_tiles; 25, 15
+n_tiles; 3, 3
+

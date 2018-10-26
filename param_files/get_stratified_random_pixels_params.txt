@@ -1,13 +1,16 @@
-raster_path; /vol/v2/stem/landcover/truth_map/nlcd2001_CAORWA_3x3equal.tif
+raster_path; /vol/v2/stem/conus/reference_rasters/nlcd2011_usfs_conus_canopy_clipped_to_conus_train.tif
 col_name; landcover
 data_band; 1
-nodata; 255
-n_samples; 1250000
+nodata; 255 
 bins; 10:11, 11:12, 20:21, 21:22, 22:23, 23:24, 30:31, 40:41, 41:42, 42:43, 51:52, 70:71, 80:81, 81:82, 89:90, 94:95
-pct_train; 0.8
-out_txt; /vol/v2/stem/conus_testing/samples/nlcd2001_conus_sample.txt
-min_samples; 100
+out_dir; /vol/v2/stem/conus/samples
 
 Optional parameters
-data_type; classified
-n_tiles; 1, 1
+pct_train; 1
+data_type; continuous
+n_tiles; 15, 25
+sampling_scheme; proportional
+min_sample; .03
+max_sample; .4
+n_per_tile; 30000
+boundary_shp; /vol/v1/general_files/datasets/spatial_data/us_national_boundary_1to5million/conus_boundary_1to5million.shp

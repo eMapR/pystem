@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Train and write to disk a spatiotemporal exploratory model
- 
+
 
 @author: shooper
 """
@@ -23,23 +23,23 @@ from multiprocessing import Pool
 import stem
 
 def _par_train_stem(n_jobs, n_sets, df_train, predict_cols, target_col, min_obs, df_sets, model_func, model_type, max_features, dt_path_template, db_path, max_val):
-    
+
     """ private helper function to avoid exec free variable error"""
     start_time = time.time()
     s = Parallel(n_jobs, backend="threading")(
             delayed(stem.par_train_estimator)(
                 i, n_sets, start_time, df_train, predict_cols, target_col,
                 min_obs, set_info, model_func, model_type, max_features,
-                dt_path_template, db_path, max_val) 
+                dt_path_template, db_path, max_val)
                 for i, (set_id, set_info) in enumerate(df_sets.iterrows()))
     return s
-    
+
 
 def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_oob_map=False, snap_coord=None, oob_map_metric='oob_rate', n_jobs=1, oob_drop=None):
     t0 = time.time()
-    
+
     inputs = stem.read_params(params)
-    
+
     # Convert params to named variables and check for required vars
     for i in inputs:
         exec ("{0} = str({1})").format(i, inputs[i])
@@ -57,7 +57,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     df_var = pd.read_csv(var_info, sep='\t', index_col='var_name')
 
     # Read in training samples and check that df_train has exactly the same
-    #   columns as variables specified in df_vars    
+    #   columns as variables specified in df_vars
     df_train = pd.read_csv(sample_txt, sep='\t')
     n_samples = len(df_train)
     unmatched_vars = [v for v in df_var.index if v not in [c for c  in df_train]]
@@ -72,7 +72,7 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
         max_target_val = int(max_target_val)
     else:
         max_target_val = df_train[target_col].max()
-    
+
     # Make a timestamped output directory if outdir not specified
     now = datetime.now()
     date_str = str(now.date()).replace('-','')
@@ -85,13 +85,13 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
 
     predict_cols = sorted(np.unique([c for c in df_train.columns for v in df_var.index if v in c]))
     df_var = df_var.reindex(df_var.index.sort_values())# Make sure predict_cols and df_var are in the same order
-    
+
     # If there are variables that should remain constant across the modeling
     #   region, get the names
     if 'constant_vars' in locals():
         constant_vars = sorted([i.strip() for i in constant_vars.split(',')])
         predict_cols += constant_vars
-    
+
     # Get samples and support set bounds
     if 'gsrd_shp' not in locals(): gsrd_shp = None
     if snap_coord:
@@ -101,8 +101,8 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
                             sets_per_cell, df_train, min_obs,
                             target_col, predict_cols, out_txt,
                             gsrd_shp, pct_train, snap_coord=snap_coord)
-    n_sets = len(df_sets)            
-    
+    n_sets = len(df_sets)
+
     # Create SQL DB and add train sample table
     '''print 'Dumping train_txt to database...'
     t1 = time.time()#'''
@@ -110,10 +110,11 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     '''engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
     #df_train.to_sql('train_sample', engine, chunksize=10000)
     print '%.1f minutes\n' % ((time.time() - t1)/60)#'''
-    
+
     # Split x and y train
     t1 = time.time()
-    if model_type.lower() == 'classifier':
+    print "'{0}'".format(model_type.lower())
+    if model_type.lower().strip() == 'classifier':  #remove .trim() peter clary  it was after lower 
         print 'Training STEM with classifier algorithm...'
         model_func = stem.fit_tree_classifier
     else:
@@ -124,14 +125,14 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     importance_cols = ['importance_%s' % c for c in predict_cols]
     for c in importance_cols:
         df_sets[c] = 0
-    
+
     # Train estimators
     dropped_sets = pd.DataFrame(columns=df_sets.columns)
     dt_dir = os.path.join(out_dir, 'decisiontree_models')
     if not os.path.exists(dt_dir):
         os.mkdir(dt_dir)
     dt_path_template = os.path.join(dt_dir, stamp + '_decisiontree_%s.pkl')
-    
+
     #oob_rates = [0]
     n_jobs = int(n_jobs)
 
@@ -143,14 +144,14 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
                 .dropna(subset=['dt_file'])\
                 .rename_axis('set_id')
     df_sets.to_csv(os.path.join(out_dir, 'support_sets.txt'), sep='\t')
-    
+
     # Consider moving this back to train function by switching to DBMS with multithread support
     '''print '\n\nMaking relationship table for samples and sets...'
     t1 = time.time()
     set_samples = pd.concat(list(samples), ignore_index=True)
     set_samples.to_sql('set_samples', engine, chunksize=100000)
     print '%.1f minutes\n' % ((time.time() - t1)/60)'''
-    
+
     # Calculate OOB rates and drop sets with too low OOB
     print 'Calculating OOB rates and dropping sets with high OOB error...'
     t1 = time.time()
@@ -181,15 +182,15 @@ def main(params, pct_train=None, min_oob=0, gsrd_shp=None, resolution=30, make_o
     #df_sets.drop('dt_model', axis=1).to_sql('support_sets', engine)
     t1 = time.time()
     print '%.1f minutes\n' % ((time.time() - t1)/60) #"""
-    
+
     '''stamp = os.path.basename(out_dir)
     db_path = os.path.join(out_dir, stamp + '.db')
     engine = sqlalchemy.create_engine('sqlite:///%s' % db_path)
     with engine.connect() as con, con.begin():
         df_sets = pd.read_sql_table('support_sets', con, index_col='set_id')
     predict_cols = ['aspectNESW','aspectNWSE','brightness','delta_brightness','delta_greenness','delta_nbr','delta_wetness', 'elevation','greenness','mse','nbr','slope','time_since','wetness']#'''
-        
-    
+
+
     print 'Total training time: %.1f minutes' % ((time.time() - t0)/60)
 
 if __name__ == '__main__':
@@ -197,7 +198,3 @@ if __name__ == '__main__':
      sys.exit(main(params))
 
 #params = '/vol/v2/stem/jdb_test/param_files/train_stem_params.txt'
-
-
-
-

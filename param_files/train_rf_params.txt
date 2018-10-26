@@ -1,0 +1,12 @@
+Paramater File for train_rf.py
+
+target_col; landcover
+sample_txt; /vol/v1/proj/stem_improv_paper/test_regions/region_20/landcover_equal_sample_18750_20171030_1544/landcover_equal_sample_18750_20171030_1544_predictors.txt
+var_txt; /vol/v2/stem/stem-git/param_files/conus_rf_vartext.txt
+out_dir; /vol/v1/proj/stem_improv_paper/test_regions/region_20
+
+Optional parameters
+n_trees; 70
+n_jobs; 15
+max_features; None
+model_type; classifier

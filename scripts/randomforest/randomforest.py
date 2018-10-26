@@ -12,7 +12,7 @@ from sklearn import ensemble
 from sklearn import metrics
 from matplotlib import pyplot as plt
 
-def read_params(txt):
+def read_params(txt, silent=False):
     '''
     Return a dictionary and a dataframe from parsed parameters in txt
     '''
@@ -39,7 +39,8 @@ def read_params(txt):
             d[var[0].strip()] = '"%s"' % var[1].strip().replace("\n", "")
             n_skip_lines += 1
 
-    print '\nParameters read from:\n', txt, '\n'
+    if not silent:
+        print '\nParameters read from:\n', txt, '\n'
     return d
 
 

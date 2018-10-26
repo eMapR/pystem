@@ -1,7 +1,7 @@
 Paramater File for test_n_trees.py
 
-target_col; imperv
-sample_txt; /vol/v2/stem/imperv/samples/imperv_sample94536_20161018_2318/imperv_sample94536_20161018_2318_predictors.txt
-var_txt; /vol/v2/stem/stem-git/param_files/test_n_trees_vartext.txt
+target_col; landcover
+sample_txt; /vol/v1/proj/stem_improv_paper/test_regions/region_28/landcover_proportional_sample_31428_20171109_1908/landcover_proportional_sample_31428_20171109_1908_predictors.txt
+var_txt; /vol/v1/proj/stem_improv_paper/scripts/param_files/varinfo_multidate.txt
 max_trees; 500
 step; 10
